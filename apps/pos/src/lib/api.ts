@@ -67,6 +67,16 @@ export type OrderCheckoutRequest =
 export type OrderCheckoutResponse =
   paths["/v1/orders/{id}/checkout"]["post"]["responses"]["200"]["content"]["application/json"];
 
+export interface Business {
+  id?: string;
+  tenant_id?: string;
+  name?: string;
+  display_prefix?: string;
+  status?: "ACTIVE" | "INACTIVE";
+  created_at?: string;
+  updated_at?: string;
+}
+
 export const RETAIL_APP_ID = "ware-retail";
 
 export async function fetchCashiers(): Promise<Cashier[]> {
@@ -151,8 +161,12 @@ export async function submitCheckout(payload: CheckoutRequest): Promise<Checkout
  * Pending Tienda orders from the Order Master (SPEC-WRTL2): only the
  * ware-retail app orders that still await payment are listed.
  */
-export async function fetchPendingRetailOrders(search?: string): Promise<Order[]> {
+export async function fetchPendingRetailOrders(
+  search?: string,
+  businessId?: string | null,
+): Promise<Order[]> {
   const term = (search ?? "").trim();
+  const business = (businessId ?? "").trim();
   const { data, error } = await api.GET("/v1/orders", {
     params: {
       header: { "X-Tenant-Id": resolveTenantId() },
@@ -161,6 +175,7 @@ export async function fetchPendingRetailOrders(search?: string): Promise<Order[]
         payment_status: "UNPAID",
         page: 1,
         size: 50,
+        ...(business ? { business } : {}),
         ...(term ? { search: term } : {}),
       },
     },
@@ -211,4 +226,17 @@ export async function submitOrderCheckout(
 
 export function newOrderIdempotencyKey(): string {
   return newIdempotencyKey();
+}
+
+/** GET /v1/orders/businesses (the OpenAPI document only types POST today). */
+export async function fetchBusinesses(): Promise<Business[]> {
+  const { data, error } = await (api as any).GET("/v1/orders/businesses", {
+    params: { header: { "X-Tenant-Id": resolveTenantId() } },
+  });
+  if (error) {
+    throw new Error(parseApiError(error, "No se pudieron cargar los negocios."));
+  }
+  if (Array.isArray(data)) return data as Business[];
+  if (Array.isArray(data?.items)) return data.items as Business[];
+  return [];
 }
