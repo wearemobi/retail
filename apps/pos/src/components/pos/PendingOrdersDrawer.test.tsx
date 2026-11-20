@@ -1,11 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { fetchOrderDetail, type Order, type OrderItem } from "../../lib/api";
+import {
+  fetchOrderDetail,
+  submitOrderCheckout,
+  type Order,
+  type OrderItem,
+} from "../../lib/api";
+import CheckoutDialog from "./CheckoutDialog";
 import PendingOrdersDrawer from "./PendingOrdersDrawer";
 
 vi.mock("../../lib/api", () => ({
+  EMISSION_POINT: "POS-01",
+  WAREHOUSE_ID: "WH-MAIN",
   fetchOrderDetail: vi.fn(),
+  fetchCustomers: vi.fn(),
+  submitCheckout: vi.fn(),
+  submitOrderCheckout: vi.fn(),
+  newOrderIdempotencyKey: () => "idem-test",
 }));
 
 const orders: Order[] = [
@@ -81,6 +93,26 @@ describe("PendingOrdersDrawer (SPEC-WRTL2)", () => {
       order: orders[0],
       items: orderItems,
     });
+    vi.mocked(submitOrderCheckout).mockReset();
+    vi.mocked(submitOrderCheckout).mockResolvedValue({
+      order_id: "ord-wa-1",
+      display_id: "#ORD-108",
+      status: "COMPLETED",
+      payment_status: "PAID",
+      total_amount: "45.2000",
+      total_paid: "45.2000",
+      change_amount: "0.0000",
+      tip_amount: "0.0000",
+      retail_order_id: "retail-1",
+      folio_number: 108,
+      fiscal_document: {
+        id: "doc-1",
+        document_type: "01",
+        generation_code: "GEN-108",
+        control_number: "DTE-01-M001-000000000000108",
+        mh_status: "PENDING",
+      },
+    });
   });
 
   afterEach(() => cleanup());
@@ -130,5 +162,76 @@ describe("PendingOrdersDrawer (SPEC-WRTL2)", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("orden no disponible");
     expect(onCharge).not.toHaveBeenCalled();
+  });
+});
+
+describe("CheckoutDialog — order checkout (SPEC-WRTL2)", () => {
+  const order: Order = {
+    ...orders[0],
+    customer_id: "42",
+    customer_tax_id: "0614-121024-101-9",
+  };
+
+  afterEach(() => cleanup());
+
+  it("liquidates the selected order via POST /v1/orders/{id}/checkout", async () => {
+    const onCompleted = vi.fn();
+    render(
+      <CheckoutDialog
+        open
+        items={[]}
+        total={0}
+        activeOrder={order}
+        orderItems={orderItems}
+        onClose={vi.fn()}
+        onCompleted={onCompleted}
+      />,
+    );
+
+    expect(screen.getByText(/#ORD-108/)).toBeInTheDocument();
+    expect(screen.getAllByText("María López").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/45\.20/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Cobrar/ }));
+
+    await waitFor(() => expect(submitOrderCheckout).toHaveBeenCalledTimes(1));
+    const [orderId, payload, idempotencyKey] = vi.mocked(submitOrderCheckout).mock.calls[0];
+    expect(orderId).toBe("ord-wa-1");
+    expect(idempotencyKey).toBe("idem-test");
+    expect(payload).toMatchObject({
+      document_type: "01",
+      payments: [{ payment_method: "CASH", amount: 45.2 }],
+    });
+    expect(payload.customer).toMatchObject({
+      customer_id: "42",
+      tax_id: "0614-121024-101-9",
+    });
+
+    expect(await screen.findByText("Orden liquidada")).toBeInTheDocument();
+    expect(screen.getByText(/Folio: #108/)).toBeInTheDocument();
+    expect(screen.getByText(/GEN-108/)).toBeInTheDocument();
+    expect(onCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the CCF document type when 03 is selected", async () => {
+    const onCompleted = vi.fn();
+    render(
+      <CheckoutDialog
+        open
+        items={[]}
+        total={0}
+        activeOrder={order}
+        orderItems={orderItems}
+        onClose={vi.fn()}
+        onCompleted={onCompleted}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /03 · CCF/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Cobrar/ }));
+
+    await waitFor(() => expect(submitOrderCheckout).toHaveBeenCalledTimes(1));
+    const [, payload] = vi.mocked(submitOrderCheckout).mock.calls[0];
+    expect(payload.document_type).toBe("03");
   });
 });
