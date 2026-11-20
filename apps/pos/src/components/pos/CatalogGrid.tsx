@@ -42,7 +42,7 @@ export default function CatalogGrid({ products, columns, onAdd }: CatalogGridPro
       {products.map((product, index) => {
         const sku = product.sku ?? "";
         const label = unitLabel(product.unit_of_measure);
-        const weighted = isWeightedUnit(product.unit_of_measure);
+        const weighted = product.is_weighable ?? isWeightedUnit(product.unit_of_measure);
         const hasStock =
           typeof product.stock_quantity === "number" || typeof product.stock === "number";
         const stockScaled =

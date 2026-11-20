@@ -64,6 +64,7 @@ export async function fetchProducts(search = ""): Promise<Product[]> {
       header: { "X-Tenant-Id": resolveTenantId() },
       query: {
         warehouse_id: WAREHOUSE_ID,
+        vertical: "RETAIL",
         size: 200,
         sort: "name,asc",
         ...(term ? { search: term } : {}),

@@ -2007,8 +2007,49 @@ export interface components {
             name: string;
             /** @example Full HD IPS */
             description?: string;
-            /** @example 59 */
+            /**
+             * @description CAT-014 unit of measure code.
+             * @example 59
+             */
             unit_of_measure?: string;
+            /**
+             * @description CAT-011 fiscal item type: 1 Bien, 2 Servicio, 3 Ambos, 4 Otros tributos.
+             * @default 1
+             * @example 1
+             * @enum {string}
+             */
+            fiscal_item_type: "1" | "2" | "3" | "4";
+            /**
+             * @description When false (e.g. services), physical stock is neither required nor decremented.
+             * @default true
+             * @example true
+             */
+            track_inventory: boolean;
+            /**
+             * @description Commercial verticals that expose the product.
+             * @default [
+             *       "RETAIL",
+             *       "KITCHEN"
+             *     ]
+             * @example [
+             *       "RETAIL"
+             *     ]
+             */
+            verticals: ("RETAIL" | "KITCHEN")[];
+            /**
+             * @description Enables weight/decimal sales in 10^-4 scale.
+             * @default false
+             * @example false
+             */
+            is_weighable: boolean;
+            /**
+             * @description Free-form JSONB extension attributes.
+             * @default {}
+             * @example {}
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
             /** @example 1500000 */
             base_price?: number;
             /** @example 450000 */
@@ -2031,6 +2072,26 @@ export interface components {
             base_price?: number;
             /** @example true */
             is_active?: boolean;
+            /**
+             * @example 1
+             * @enum {string}
+             */
+            fiscal_item_type?: "1" | "2" | "3" | "4";
+            /** @example true */
+            track_inventory?: boolean;
+            /**
+             * @example [
+             *       "RETAIL",
+             *       "KITCHEN"
+             *     ]
+             */
+            verticals?: ("RETAIL" | "KITCHEN")[];
+            /** @example false */
+            is_weighable?: boolean;
+            /** @example {} */
+            metadata?: {
+                [key: string]: unknown;
+            };
             /** Format: date-time */
             created_at?: string;
         };
@@ -2039,10 +2100,43 @@ export interface components {
             name: string;
             /** @example Full HD IPS */
             description?: string;
-            /** @example 59 */
+            /**
+             * @description CAT-014 unit of measure code.
+             * @example 59
+             */
             unit_of_measure?: string;
             /** @example 1500000 */
             base_price?: number;
+            /**
+             * @description CAT-011 fiscal item type. Omit to preserve the current value.
+             * @example 2
+             * @enum {string}
+             */
+            fiscal_item_type?: "1" | "2" | "3" | "4";
+            /**
+             * @description Omit to preserve the current value.
+             * @example false
+             */
+            track_inventory?: boolean;
+            /**
+             * @description Omit to preserve the current value.
+             * @example [
+             *       "RETAIL"
+             *     ]
+             */
+            verticals?: ("RETAIL" | "KITCHEN")[];
+            /**
+             * @description Omit to preserve the current value.
+             * @example false
+             */
+            is_weighable?: boolean;
+            /**
+             * @description Omit to preserve the current value.
+             * @example {}
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
         };
         ProductDeactivateResponse: {
             /** @example deactivated */
@@ -2183,6 +2277,26 @@ export interface components {
             stock?: number;
             /** @example true */
             is_active?: boolean;
+            /**
+             * @example 1
+             * @enum {string}
+             */
+            fiscal_item_type?: "1" | "2" | "3" | "4";
+            /** @example true */
+            track_inventory?: boolean;
+            /**
+             * @example [
+             *       "RETAIL",
+             *       "KITCHEN"
+             *     ]
+             */
+            verticals?: ("RETAIL" | "KITCHEN")[];
+            /** @example false */
+            is_weighable?: boolean;
+            /** @example {} */
+            metadata?: {
+                [key: string]: unknown;
+            };
             /** Format: date-time */
             created_at?: string;
         };
@@ -5177,6 +5291,10 @@ export interface operations {
                 search?: string;
                 /** @description Case-insensitive SKU prefix filter */
                 sku?: string;
+                /** @description Filter by commercial vertical (SPEC-W110a). */
+                vertical?: "RETAIL" | "KITCHEN";
+                /** @description Filter by CAT-011 fiscal item type: 1 Bien, 2 Servicio, 3 Ambos, 4 Otros tributos. */
+                fiscal_item_type?: "1" | "2" | "3" | "4";
                 /** @description 1-indexed page number (Spring Data style). Takes precedence over offset. */
                 page?: number;
                 /** @description Items per page (aliases page_size and limit). Capped at 200. */
