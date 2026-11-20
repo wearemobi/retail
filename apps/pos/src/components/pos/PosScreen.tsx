@@ -1,12 +1,20 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, ShoppingCart } from "lucide-react";
 import { Button, playAdd, type SatelliteTheme } from "@retail/common";
-import { fetchProductBySku, fetchProducts, type Product } from "../../lib/api";
+import {
+  fetchPendingRetailOrders,
+  fetchProductBySku,
+  fetchProducts,
+  type Order,
+  type OrderItem,
+  type Product,
+} from "../../lib/api";
 import { cartSubtotal, useCartStore } from "../../store/cart.store";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import CatalogGrid from "./CatalogGrid";
 import CartPanel from "./CartPanel";
 import CheckoutDialog from "./CheckoutDialog";
+import PendingOrdersDrawer from "./PendingOrdersDrawer";
 import PosHeader, {
   scaleMultiplier,
   type PosColumnCount,
@@ -47,6 +55,14 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const [search, setSearch] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [ordersOpen, setOrdersOpen] = useState(false);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
+  const [ordersQuery, setOrdersQuery] = useState("");
+  const [ordersRefreshToken, setOrdersRefreshToken] = useState(0);
+  const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [activeOrderItems, setActiveOrderItems] = useState<OrderItem[]>([]);
   const [columns, setColumns] = useState<PosColumnCount>(readColumns);
   const [fontScale, setFontScale] = useState<PosFontScale>(readScale);
 
@@ -55,6 +71,31 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const clear = useCartStore((state) => state.clear);
   const subtotal = cartSubtotal(items);
   const debouncedSearch = useDebouncedValue(search, 250);
+  const debouncedOrdersQuery = useDebouncedValue(ordersQuery, 250);
+  const pendingOrdersCount = orders.filter(
+    (order) => order.status !== "CANCELLED" && order.status !== "COMPLETED",
+  ).length;
+
+  useEffect(() => {
+    let cancelled = false;
+    setOrdersLoading(true);
+    setOrdersError("");
+
+    fetchPendingRetailOrders(debouncedOrdersQuery)
+      .then((list) => {
+        if (!cancelled) setOrders(list);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setOrdersError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setOrdersLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedOrdersQuery, ordersRefreshToken]);
 
   useEffect(() => {
     try {
@@ -98,6 +139,37 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
     playAdd();
   }
 
+  function openWalkInCheckout() {
+    setActiveOrder(null);
+    setActiveOrderItems([]);
+    setCheckoutOpen(true);
+  }
+
+  function handleChargeOrder(order: Order, orderItems: OrderItem[]) {
+    setActiveOrder(order);
+    setActiveOrderItems(orderItems);
+    setOrdersOpen(false);
+    setCheckoutOpen(true);
+  }
+
+  function closeCheckout() {
+    setCheckoutOpen(false);
+    setActiveOrder(null);
+    setActiveOrderItems([]);
+  }
+
+  function handleCheckoutCompleted() {
+    if (activeOrder) {
+      setOrdersRefreshToken((token) => token + 1);
+      return;
+    }
+    clear();
+  }
+
+  function refreshOrders() {
+    setOrdersRefreshToken((token) => token + 1);
+  }
+
   async function handleScan(raw: string) {
     const term = raw.trim();
     if (!term) return;
@@ -125,6 +197,8 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         onSearchSubmit={(value) => void handleScan(value)}
         cartCount={items.length}
         cartTotal={subtotal}
+        pendingOrdersCount={pendingOrdersCount}
+        onOpenOrders={() => setOrdersOpen(true)}
         columns={columns}
         onColumnsChange={setColumns}
         fontScale={fontScale}
@@ -167,7 +241,7 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         </main>
 
         <aside className="hidden w-[380px] shrink-0 border-l border-border bg-card/40 lg:block">
-          <CartPanel items={items} onCheckout={() => setCheckoutOpen(true)} />
+          <CartPanel items={items} onCheckout={openWalkInCheckout} />
         </aside>
       </div>
 
@@ -190,17 +264,31 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
           onClose={() => setCartOpen(false)}
           onCheckout={() => {
             setCartOpen(false);
-            setCheckoutOpen(true);
+            openWalkInCheckout();
           }}
         />
       )}
+
+      <PendingOrdersDrawer
+        open={ordersOpen}
+        orders={orders}
+        loading={ordersLoading}
+        error={ordersError}
+        search={ordersQuery}
+        onSearch={setOrdersQuery}
+        onRetry={refreshOrders}
+        onClose={() => setOrdersOpen(false)}
+        onCharge={handleChargeOrder}
+      />
 
       <CheckoutDialog
         open={checkoutOpen}
         items={items}
         total={subtotal}
-        onClose={() => setCheckoutOpen(false)}
-        onCompleted={clear}
+        activeOrder={activeOrder}
+        orderItems={activeOrderItems}
+        onClose={closeCheckout}
+        onCompleted={handleCheckoutCompleted}
       />
     </div>
   );

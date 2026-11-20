@@ -4097,7 +4097,7 @@ export interface components {
             /** @enum {string} */
             order_type?: "DINE_IN" | "TAKEAWAY" | "DELIVERY" | "ECOMMERCE" | "CALL_CENTER";
             /** @enum {string} */
-            source_channel?: "POS" | "WEB" | "KIOSK" | "PHONE" | "API";
+            source_channel?: "POS" | "WEB" | "KIOSK" | "PHONE" | "API" | "WHATSAPP" | "INSTAGRAM";
             app_id?: string;
             /** @example #ORD-104 */
             display_id?: string;
@@ -4153,7 +4153,8 @@ export interface components {
             /** @enum {string} */
             order_type: "DINE_IN" | "TAKEAWAY" | "DELIVERY" | "ECOMMERCE" | "CALL_CENTER";
             /** @enum {string} */
-            source_channel?: "POS" | "WEB" | "KIOSK" | "PHONE" | "API";
+            source_channel?: "POS" | "WEB" | "KIOSK" | "PHONE" | "API" | "WHATSAPP" | "INSTAGRAM";
+            /** @description Owning application/entitlement (e.g. ware-retail for Tienda omnichannel orders). */
             app_id?: string;
             currency_code?: string;
             customer_id?: string;
@@ -7113,7 +7114,11 @@ export interface operations {
                 /** @description Order type filter. */
                 type?: "DINE_IN" | "TAKEAWAY" | "DELIVERY" | "ECOMMERCE" | "CALL_CENTER";
                 /** @description Source channel filter. */
-                channel?: "POS" | "WEB" | "KIOSK" | "PHONE" | "API";
+                channel?: "POS" | "WEB" | "KIOSK" | "PHONE" | "API" | "WHATSAPP" | "INSTAGRAM";
+                /** @description Application/entitlement filter (e.g. ware-retail for Tienda omnichannel orders). */
+                app_id?: string;
+                /** @description Payment status filter (e.g. UNPAID for pending Tienda orders). */
+                payment_status?: "UNPAID" | "PAID" | "PARTIAL" | "REFUNDED";
                 status?: "PENDING" | "CONFIRMED" | "IN_PROGRESS" | "READY" | "DISPATCHED" | "COMPLETED" | "CANCELLED";
                 /** @description Case-insensitive match on display_id or request id. */
                 search?: string;

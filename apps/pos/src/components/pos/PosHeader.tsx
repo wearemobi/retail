@@ -1,5 +1,6 @@
-import { Search, Store } from "lucide-react";
+import { Search, ShoppingBag, Store } from "lucide-react";
 import {
+  Badge,
   Button,
   Input,
   SatelliteHeader,
@@ -28,6 +29,8 @@ interface PosHeaderProps {
   onSearchSubmit: (value: string) => void;
   cartCount: number;
   cartTotal: number;
+  pendingOrdersCount?: number;
+  onOpenOrders?: () => void;
   columns: PosColumnCount;
   onColumnsChange: (columns: PosColumnCount) => void;
   fontScale: PosFontScale;
@@ -42,6 +45,8 @@ export default function PosHeader({
   onSearchSubmit,
   cartCount,
   cartTotal,
+  pendingOrdersCount = 0,
+  onOpenOrders = () => {},
   columns,
   onColumnsChange,
   fontScale,
@@ -70,6 +75,24 @@ export default function PosHeader({
       operatorName={operatorName}
       controls={
         <>
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={onOpenOrders}
+            className="h-7 gap-1.5"
+            aria-label={`Órdenes pendientes (${pendingOrdersCount})`}
+            title="Órdenes pendientes de Tienda"
+          >
+            <ShoppingBag className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Órdenes</span>
+            <Badge
+              variant={pendingOrdersCount > 0 ? "accent" : "outline"}
+              className="text-[10px]"
+            >
+              {pendingOrdersCount}
+            </Badge>
+          </Button>
+
           <div
             role="group"
             aria-label="Columnas del catálogo"

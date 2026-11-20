@@ -49,6 +49,26 @@ export type CheckoutRequest =
 export type CheckoutResponse =
   paths["/v1/pos/checkout"]["post"]["responses"]["200"]["content"]["application/json"];
 
+type OrdersListPayload =
+  paths["/v1/orders"]["get"]["responses"]["200"]["content"]["application/json"];
+
+export type Order = NonNullable<OrdersListPayload["items"]>[number];
+
+type OrderDetailPayload =
+  paths["/v1/orders/{id}"]["get"]["responses"]["200"]["content"]["application/json"];
+
+export type OrderDetailResponse = OrderDetailPayload;
+
+export type OrderItem = NonNullable<OrderDetailPayload["items"]>[number];
+
+export type OrderCheckoutRequest =
+  paths["/v1/orders/{id}/checkout"]["post"]["requestBody"]["content"]["application/json"];
+
+export type OrderCheckoutResponse =
+  paths["/v1/orders/{id}/checkout"]["post"]["responses"]["200"]["content"]["application/json"];
+
+export const RETAIL_APP_ID = "ware-retail";
+
 export async function fetchCashiers(): Promise<Cashier[]> {
   return commonFetchCashiers(api, resolveTenantId());
 }
@@ -125,4 +145,70 @@ export async function submitCheckout(payload: CheckoutRequest): Promise<Checkout
     throw new Error(parseApiError(error, "No fue posible procesar la venta."));
   }
   return data;
+}
+
+/**
+ * Pending Tienda orders from the Order Master (SPEC-WRTL2): only the
+ * ware-retail app orders that still await payment are listed.
+ */
+export async function fetchPendingRetailOrders(search?: string): Promise<Order[]> {
+  const term = (search ?? "").trim();
+  const { data, error } = await api.GET("/v1/orders", {
+    params: {
+      header: { "X-Tenant-Id": resolveTenantId() },
+      query: {
+        app_id: RETAIL_APP_ID,
+        payment_status: "UNPAID",
+        page: 1,
+        size: 50,
+        ...(term ? { search: term } : {}),
+      },
+    },
+  });
+  if (error || !data) {
+    throw new Error(
+      parseApiError(error, "No se pudieron cargar las órdenes pendientes."),
+    );
+  }
+  return data.items ?? [];
+}
+
+export async function fetchOrderDetail(orderId: string): Promise<OrderDetailResponse> {
+  const { data, error } = await api.GET("/v1/orders/{id}", {
+    params: {
+      header: { "X-Tenant-Id": resolveTenantId() },
+      path: { id: orderId },
+    },
+  });
+  if (error || !data) {
+    throw new Error(
+      parseApiError(error, "No se pudo cargar el detalle de la orden."),
+    );
+  }
+  return data;
+}
+
+export async function submitOrderCheckout(
+  orderId: string,
+  payload: OrderCheckoutRequest,
+  idempotencyKey: string,
+): Promise<OrderCheckoutResponse> {
+  const { data, error } = await api.POST("/v1/orders/{id}/checkout", {
+    params: {
+      header: {
+        "X-Tenant-Id": resolveTenantId(),
+        "Idempotency-Key": idempotencyKey,
+      },
+      path: { id: orderId },
+    },
+    body: payload,
+  });
+  if (error || !data) {
+    throw new Error(parseApiError(error, "No se pudo liquidar la orden."));
+  }
+  return data;
+}
+
+export function newOrderIdempotencyKey(): string {
+  return newIdempotencyKey();
 }

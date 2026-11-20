@@ -11,9 +11,14 @@ import { Button, Input } from "@retail/common";
 import {
   EMISSION_POINT,
   WAREHOUSE_ID,
+  newOrderIdempotencyKey,
   submitCheckout,
+  submitOrderCheckout,
   type CheckoutRequest,
   type Customer,
+  type Order,
+  type OrderCheckoutRequest,
+  type OrderItem,
 } from "../../lib/api";
 import {
   formatScaledMoney,
@@ -36,8 +41,11 @@ const PAYMENT_METHODS: { code: PaymentMethod; label: string }[] = [
 
 interface CheckoutSuccess {
   orderId?: string;
+  displayId?: string;
   folio?: number;
   controlNumber?: string;
+  generationCode?: string;
+  mhStatus?: string;
   totalPaid: number;
   changeDue: number;
 }
@@ -46,17 +54,43 @@ interface CheckoutDialogProps {
   open: boolean;
   items: CartItem[];
   total: number;
+  activeOrder?: Order | null;
+  orderItems?: OrderItem[];
   onClose: () => void;
   onCompleted: () => void;
+}
+
+function customerFromOrder(order: Order | null | undefined): Customer | null {
+  if (!order?.customer_id) return null;
+  const id = Number(order.customer_id);
+  if (!Number.isFinite(id)) return null;
+  return {
+    id,
+    legal_name: order.customer_name ?? "",
+    tax_id: order.customer_tax_id ?? "",
+  };
+}
+
+function orderPaymentMethod(
+  method: PaymentMethod,
+): "CASH" | "CREDIT_CARD" | "TRANSFER" {
+  if (method === "02") return "CREDIT_CARD";
+  if (method === "03") return "TRANSFER";
+  return "CASH";
 }
 
 export default function CheckoutDialog({
   open,
   items,
   total,
+  activeOrder = null,
+  orderItems = [],
   onClose,
   onCompleted,
 }: CheckoutDialogProps) {
+  const orderMode = activeOrder !== null;
+  const activeTotal = orderMode ? activeOrder.total_amount ?? 0 : total;
+  const displayItemCount = orderMode ? orderItems.length : items.length;
   const [documentType, setDocumentType] = useState<DocumentType>("01");
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("01");
@@ -65,34 +99,37 @@ export default function CheckoutDialog({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<CheckoutSuccess | null>(null);
 
+  const openOrderId = activeOrder?.id;
+
   useEffect(() => {
     if (!open) return;
     setDocumentType("01");
-    setCustomer(null);
+    setCustomer(customerFromOrder(activeOrder));
     setPaymentMethod("01");
-    setAmountTendered(fromScaled(total).toFixed(2));
+    setAmountTendered(fromScaled(activeTotal).toFixed(2));
     setSubmitting(false);
     setError("");
     setSuccess(null);
-    // `total` is intentionally read only when the dialog opens; clearing the
-    // cart after a successful sale must not reset the receipt.
+    // `total`/`activeTotal` are intentionally read only when the dialog opens;
+    // clearing the cart after a successful sale must not reset the receipt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, openOrderId]);
 
   if (!open) return null;
 
   const tenderedScaled = parseMoneyInput(amountTendered);
   const isCash = paymentMethod === "01";
-  const cashValid = !isCash || (tenderedScaled !== null && tenderedScaled >= total);
+  const cashValid = !isCash || (tenderedScaled !== null && tenderedScaled >= activeTotal);
   const customerValid =
     documentType === "01" ||
     (customer !== null &&
       typeof customer.id === "number" &&
       (customer.tax_id ?? "").trim() !== "");
-  const canSubmit = items.length > 0 && !submitting && cashValid && customerValid;
+  const canSubmit =
+    displayItemCount > 0 && !submitting && cashValid && customerValid;
   const changeDue =
-    isCash && tenderedScaled !== null && tenderedScaled > total
-      ? tenderedScaled - total
+    isCash && tenderedScaled !== null && tenderedScaled > activeTotal
+      ? tenderedScaled - activeTotal
       : 0;
 
   async function handleSubmit() {
@@ -101,26 +138,70 @@ export default function CheckoutDialog({
     setError("");
 
     const changeOnSuccess = changeDue;
-    const body: CheckoutRequest = {
-      warehouse_id: WAREHOUSE_ID,
-      emission_point: EMISSION_POINT,
-      payment_method: paymentMethod,
-      document_type: documentType,
-      currency: "USD",
-      items: items.map((item) => ({
-        sku: item.sku,
-        description: item.name,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        discount_amount: 0,
-      })),
-    };
-
-    if (customer && typeof customer.id === "number") {
-      body.customer_id = String(customer.id);
-    }
 
     try {
+      if (orderMode && activeOrder?.id) {
+        const payload: OrderCheckoutRequest = {
+          document_type: documentType,
+          payments: [
+            {
+              payment_method: orderPaymentMethod(paymentMethod),
+              amount: isCash && tenderedScaled !== null
+                ? fromScaled(tenderedScaled)
+                : fromScaled(activeTotal),
+            },
+          ],
+        };
+        if (customer && typeof customer.id === "number" && (customer.tax_id ?? "").trim()) {
+          payload.customer = {
+            customer_id: String(customer.id),
+            name: customer.legal_name ?? "",
+            tax_id: customer.tax_id ?? "",
+            document_type: "36",
+          };
+        }
+
+        const response = await submitOrderCheckout(
+          activeOrder.id,
+          payload,
+          newOrderIdempotencyKey(),
+        );
+        setSuccess({
+          orderId: response.order_id ?? activeOrder.id,
+          displayId: response.display_id ?? activeOrder.display_id,
+          folio: response.folio_number,
+          generationCode: response.fiscal_document?.generation_code,
+          mhStatus: response.fiscal_document?.mh_status,
+          totalPaid: response.total_paid
+            ? fromScaled(Number(response.total_paid))
+            : activeTotal,
+          changeDue: response.change_amount
+            ? fromScaled(Number(response.change_amount))
+            : changeOnSuccess,
+        });
+        onCompleted();
+        return;
+      }
+
+      const body: CheckoutRequest = {
+        warehouse_id: WAREHOUSE_ID,
+        emission_point: EMISSION_POINT,
+        payment_method: paymentMethod,
+        document_type: documentType,
+        currency: "USD",
+        items: items.map((item) => ({
+          sku: item.sku,
+          description: item.name,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+          discount_amount: 0,
+        })),
+      };
+
+      if (customer && typeof customer.id === "number") {
+        body.customer_id = String(customer.id);
+      }
+
       const response = await submitCheckout(body);
       setSuccess({
         orderId: response.order_id,
@@ -131,7 +212,13 @@ export default function CheckoutDialog({
       });
       onCompleted();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No fue posible procesar la venta.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : orderMode
+            ? "No fue posible liquidar la orden."
+            : "No fue posible procesar la venta.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -141,7 +228,7 @@ export default function CheckoutDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Cobrar venta"
+      aria-label={orderMode ? "Cobrar orden" : "Cobrar venta"}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
       onClick={(event) => {
         if (event.target === event.currentTarget && !submitting) onClose();
@@ -150,11 +237,23 @@ export default function CheckoutDialog({
       <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <h2 className="text-base font-bold">Cobrar venta</h2>
+            <h2 className="text-base font-bold">
+              {orderMode ? "Cobrar orden" : "Cobrar venta"}
+            </h2>
             <p className="text-xs text-muted-foreground">
-              {items.length} ítem{items.length === 1 ? "" : "s"} · Total{" "}
-              <span className="font-semibold text-foreground">{formatScaledMoney(total)}</span>
+              {displayItemCount} ítem{displayItemCount === 1 ? "" : "s"} · Total{" "}
+              <span className="font-semibold text-foreground">
+                {formatScaledMoney(activeTotal)}
+              </span>
+              {orderMode && activeOrder?.display_id
+                ? ` · ${activeOrder.display_id}`
+                : ""}
             </p>
+            {orderMode && activeOrder?.customer_name && (
+              <p className="text-[11px] text-muted-foreground">
+                {activeOrder.customer_name}
+              </p>
+            )}
           </div>
           <Button
             variant="ghost"
@@ -174,12 +273,21 @@ export default function CheckoutDialog({
               <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
             </div>
             <div className="flex flex-col gap-1">
-              <h3 className="text-base font-bold">Venta procesada</h3>
+              <h3 className="text-base font-bold">
+                {orderMode ? "Orden liquidada" : "Venta procesada"}
+              </h3>
               <p className="text-xs text-muted-foreground">
                 {success.controlNumber
                   ? `Comprobante: ${success.controlNumber}`
-                  : `Orden: ${success.orderId ?? "—"}`}
+                  : success.generationCode
+                    ? `Código de generación: ${success.generationCode}`
+                    : `Orden: ${success.displayId ?? success.orderId ?? "—"}`}
               </p>
+              {success.mhStatus && (
+                <p className="text-[11px] text-muted-foreground">
+                  Estado MH: {success.mhStatus}
+                </p>
+              )}
               {typeof success.folio === "number" && (
                 <p className="font-mono text-xs text-muted-foreground">Folio: #{success.folio}</p>
               )}
@@ -256,7 +364,9 @@ export default function CheckoutDialog({
                   Condición de pago
                 </span>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {PAYMENT_METHODS.map((method) => (
+                  {PAYMENT_METHODS.filter(
+                    (method) => !orderMode || ["01", "02", "03"].includes(method.code),
+                  ).map((method) => (
                     <Button
                       key={method.code}
                       type="button"
@@ -284,7 +394,7 @@ export default function CheckoutDialog({
                       variant="ghost"
                       size="xs"
                       className="h-6"
-                      onClick={() => setAmountTendered(fromScaled(total).toFixed(2))}
+                      onClick={() => setAmountTendered(fromScaled(activeTotal).toFixed(2))}
                     >
                       Exacto
                     </Button>
@@ -296,7 +406,7 @@ export default function CheckoutDialog({
                     onChange={(event) => setAmountTendered(event.target.value)}
                     placeholder="0.00"
                   />
-                  {tenderedScaled !== null && tenderedScaled >= total ? (
+                  {tenderedScaled !== null && tenderedScaled >= activeTotal ? (
                     <div className="flex items-center justify-between text-sm">
                       <span className="font-medium text-muted-foreground">Cambio</span>
                       <span className="font-bold text-emerald-600 dark:text-emerald-400">
@@ -323,7 +433,7 @@ export default function CheckoutDialog({
                     Procesando…
                   </>
                 ) : (
-                  `Cobrar ${formatScaledMoney(total)}`
+                  `Cobrar ${formatScaledMoney(activeTotal)}`
                 )}
               </Button>
             </div>
