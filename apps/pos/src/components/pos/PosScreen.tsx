@@ -1,0 +1,207 @@
+import { useEffect, useState } from "react";
+import { AlertCircle, ShoppingCart } from "lucide-react";
+import { Button, playAdd, type SatelliteTheme } from "@retail/common";
+import { fetchProductBySku, fetchProducts, type Product } from "../../lib/api";
+import { cartSubtotal, useCartStore } from "../../store/cart.store";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import CatalogGrid from "./CatalogGrid";
+import CartPanel from "./CartPanel";
+import CheckoutDialog from "./CheckoutDialog";
+import PosHeader, {
+  scaleMultiplier,
+  type PosColumnCount,
+  type PosFontScale,
+} from "./PosHeader";
+
+const COLUMNS_STORAGE_KEY = "ware-pos.columns";
+const SCALE_STORAGE_KEY = "ware-pos.fontScale";
+
+function readColumns(): PosColumnCount {
+  try {
+    const saved = Number(window.localStorage.getItem(COLUMNS_STORAGE_KEY));
+    return ([2, 3, 4, 6] as number[]).includes(saved) ? (saved as PosColumnCount) : 3;
+  } catch {
+    return 3;
+  }
+}
+
+function readScale(): PosFontScale {
+  try {
+    const saved = window.localStorage.getItem(SCALE_STORAGE_KEY);
+    return saved === "sm" || saved === "lg" ? saved : "base";
+  } catch {
+    return "base";
+  }
+}
+
+interface PosScreenProps {
+  theme?: SatelliteTheme;
+  onToggleTheme?: () => void;
+}
+
+export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {}) {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [scanError, setScanError] = useState("");
+  const [search, setSearch] = useState("");
+  const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [columns, setColumns] = useState<PosColumnCount>(readColumns);
+  const [fontScale, setFontScale] = useState<PosFontScale>(readScale);
+
+  const items = useCartStore((state) => state.items);
+  const addItem = useCartStore((state) => state.addItem);
+  const clear = useCartStore((state) => state.clear);
+  const subtotal = cartSubtotal(items);
+  const debouncedSearch = useDebouncedValue(search, 250);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(COLUMNS_STORAGE_KEY, String(columns));
+    } catch {
+      // ignore restricted storage
+    }
+  }, [columns]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SCALE_STORAGE_KEY, fontScale);
+    } catch {
+      // ignore restricted storage
+    }
+  }, [fontScale]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+
+    fetchProducts(debouncedSearch)
+      .then((list) => {
+        if (!cancelled) setProducts(list);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearch]);
+
+  function handleAdd(product: Product) {
+    addItem(product);
+    playAdd();
+  }
+
+  async function handleScan(raw: string) {
+    const term = raw.trim();
+    if (!term) return;
+    setScanError("");
+
+    const localMatch = products.find(
+      (product) => (product.sku ?? "").toLowerCase() === term.toLowerCase(),
+    );
+    const product = localMatch ?? (await fetchProductBySku(term));
+
+    if (!product) {
+      setScanError(`No se encontró un producto con el SKU «${term}».`);
+      return;
+    }
+
+    handleAdd(product);
+    setSearch("");
+  }
+
+  return (
+    <div className="flex h-full flex-col bg-background text-foreground">
+      <PosHeader
+        search={search}
+        onSearch={setSearch}
+        onSearchSubmit={(value) => void handleScan(value)}
+        cartCount={items.length}
+        cartTotal={subtotal}
+        columns={columns}
+        onColumnsChange={setColumns}
+        fontScale={fontScale}
+        onFontScaleChange={setFontScale}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+      />
+
+      <div className="flex min-h-0 flex-1">
+        <main
+          className="min-w-0 flex-1 overflow-y-auto p-3"
+          style={{ zoom: scaleMultiplier(fontScale) }}
+        >
+          {scanError && (
+            <div
+              role="alert"
+              className="mb-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/15 px-3 py-2 text-xs text-destructive"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{scanError}</span>
+            </div>
+          )}
+
+          {error && (
+            <div
+              role="alert"
+              className="rounded-lg border border-destructive/30 bg-destructive/15 px-4 py-2 text-sm text-destructive"
+            >
+              {error}
+            </div>
+          )}
+
+          {!error && loading && products.length === 0 && (
+            <p className="animate-pulse text-sm text-muted-foreground">Cargando catálogo…</p>
+          )}
+
+          {!error && !(loading && products.length === 0) && (
+            <CatalogGrid products={products} columns={columns} onAdd={handleAdd} />
+          )}
+        </main>
+
+        <aside className="hidden w-[380px] shrink-0 border-l border-border bg-card/40 lg:block">
+          <CartPanel items={items} onCheckout={() => setCheckoutOpen(true)} />
+        </aside>
+      </div>
+
+      {items.length > 0 && (
+        <Button
+          variant="accent"
+          size="lg"
+          onClick={() => setCartOpen(true)}
+          className="fixed bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full px-6 shadow-lg lg:hidden"
+        >
+          <ShoppingCart className="h-4 w-4" aria-hidden="true" />
+          Ver carrito ({items.length})
+        </Button>
+      )}
+
+      {cartOpen && (
+        <CartPanel
+          variant="drawer"
+          items={items}
+          onClose={() => setCartOpen(false)}
+          onCheckout={() => {
+            setCartOpen(false);
+            setCheckoutOpen(true);
+          }}
+        />
+      )}
+
+      <CheckoutDialog
+        open={checkoutOpen}
+        items={items}
+        total={subtotal}
+        onClose={() => setCheckoutOpen(false)}
+        onCompleted={clear}
+      />
+    </div>
+  );
+}

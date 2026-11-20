@@ -1,0 +1,20 @@
+{
+  "name": "retail-monorepo",
+  "private": true,
+  "description": "M.O.B.I.™ Retail Satellite Apps Monorepo (POS & Common) — SPEC-WRTL1",
+  "author": "M.O.B.I.™",
+  "type": "module",
+  "scripts": {
+    "dev:pos": "pnpm --filter @retail/pos dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r run typecheck",
+    "deploy:pos": "pnpm --filter @retail/pos run deploy",
+    "api:gen": "openapi-typescript ../wared/api/openapi.yaml -o packages/common/src/api/schema.d.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.6.1",
+    "typescript": "^5.7.3"
+  }
+}
