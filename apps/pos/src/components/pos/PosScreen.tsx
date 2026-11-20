@@ -2,13 +2,17 @@ import { useEffect, useState } from "react";
 import { AlertCircle, ShoppingCart } from "lucide-react";
 import { Button, playAdd, type SatelliteTheme } from "@retail/common";
 import {
+  fetchBusinesses,
   fetchPendingRetailOrders,
   fetchProductBySku,
   fetchProducts,
+  resolveTenantId,
+  type Business,
   type Order,
   type OrderItem,
   type Product,
 } from "../../lib/api";
+import { storedBusinessId, useAuthStore } from "../../store/auth";
 import { cartSubtotal, useCartStore } from "../../store/cart.store";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import CatalogGrid from "./CatalogGrid";
@@ -65,6 +69,9 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const [activeOrderItems, setActiveOrderItems] = useState<OrderItem[]>([]);
   const [columns, setColumns] = useState<PosColumnCount>(readColumns);
   const [fontScale, setFontScale] = useState<PosFontScale>(readScale);
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const activeBusinessId = useAuthStore((state) => state.businessId);
+  const setBusinessId = useAuthStore((state) => state.setBusinessId);
 
   const items = useCartStore((state) => state.items);
   const addItem = useCartStore((state) => state.addItem);
@@ -76,12 +83,37 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
     (order) => order.status !== "CANCELLED" && order.status !== "COMPLETED",
   ).length;
 
+  // Resolve the active business: ?b= from the QR wins, then the persisted
+  // per-tenant selection, then the first active business (SPEC-WRTL3).
+  useEffect(() => {
+    let cancelled = false;
+    fetchBusinesses()
+      .then((list) => {
+        if (cancelled) return;
+        setBusinesses(list);
+        const candidate =
+          list.find((business) => business.id === activeBusinessId) ??
+          list.find((business) => business.id === storedBusinessId(resolveTenantId())) ??
+          list[0];
+        if (candidate?.id && candidate.id !== activeBusinessId) {
+          setBusinessId(candidate.id);
+        }
+      })
+      .catch(() => {
+        // The POS stays usable with the cart even if the business list fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setOrdersLoading(true);
     setOrdersError("");
 
-    fetchPendingRetailOrders(debouncedOrdersQuery)
+    fetchPendingRetailOrders(debouncedOrdersQuery, activeBusinessId)
       .then((list) => {
         if (!cancelled) setOrders(list);
       })
@@ -95,7 +127,7 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
     return () => {
       cancelled = true;
     };
-  }, [debouncedOrdersQuery, ordersRefreshToken]);
+  }, [debouncedOrdersQuery, ordersRefreshToken, activeBusinessId]);
 
   useEffect(() => {
     try {
@@ -199,6 +231,9 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         cartTotal={subtotal}
         pendingOrdersCount={pendingOrdersCount}
         onOpenOrders={() => setOrdersOpen(true)}
+        businesses={businesses}
+        activeBusinessId={activeBusinessId}
+        onBusinessChange={setBusinessId}
         columns={columns}
         onColumnsChange={setColumns}
         fontScale={fontScale}
@@ -275,6 +310,7 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         loading={ordersLoading}
         error={ordersError}
         search={ordersQuery}
+        businessId={activeBusinessId}
         onSearch={setOrdersQuery}
         onRetry={refreshOrders}
         onClose={() => setOrdersOpen(false)}

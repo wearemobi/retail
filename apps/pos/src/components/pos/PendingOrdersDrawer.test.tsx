@@ -30,6 +30,7 @@ const orders: Order[] = [
     source_channel: "WHATSAPP",
     payment_status: "UNPAID",
     status: "PENDING",
+    business_id: "b1",
   },
   {
     id: "ord-ig-2",
@@ -40,6 +41,7 @@ const orders: Order[] = [
     source_channel: "INSTAGRAM",
     payment_status: "UNPAID",
     status: "CONFIRMED",
+    business_id: "b1",
   },
   {
     id: "ord-cancelled",
@@ -132,6 +134,24 @@ describe("PendingOrdersDrawer (SPEC-WRTL2)", () => {
 
     expect(screen.queryByText("#ORD-110")).toBeNull();
     expect(screen.queryByText("Anulada")).toBeNull();
+  });
+
+  it("filters pending orders by the active business", () => {
+    const otherBusinessOrder = {
+      ...orders[0],
+      id: "ord-other",
+      display_id: "#ORD-200",
+      customer_name: "Pedido Tortillería",
+      business_id: "b2",
+    };
+    renderDrawer({
+      orders: [...orders, otherBusinessOrder],
+      businessId: "b1",
+    });
+
+    expect(screen.getByText("#ORD-108")).toBeTruthy();
+    expect(screen.queryByText("#ORD-200")).toBeNull();
+    expect(screen.queryByText("Pedido Tortillería")).toBeNull();
   });
 
   it("charges an order through POST /v1/orders/{id}/checkout flow", async () => {

@@ -7,7 +7,7 @@ import {
   cn,
   type SatelliteTheme,
 } from "@retail/common";
-import { EMISSION_POINT, resolveTenantId } from "../../lib/api";
+import { EMISSION_POINT, resolveTenantId, type Business } from "../../lib/api";
 import { formatScaledMoney } from "../../lib/quantity";
 import { useAuthStore } from "../../store/auth";
 
@@ -31,6 +31,9 @@ interface PosHeaderProps {
   cartTotal: number;
   pendingOrdersCount?: number;
   onOpenOrders?: () => void;
+  businesses?: Business[];
+  activeBusinessId?: string;
+  onBusinessChange?: (businessId: string) => void;
   columns: PosColumnCount;
   onColumnsChange: (columns: PosColumnCount) => void;
   fontScale: PosFontScale;
@@ -47,6 +50,9 @@ export default function PosHeader({
   cartTotal,
   pendingOrdersCount = 0,
   onOpenOrders = () => {},
+  businesses = [],
+  activeBusinessId = "",
+  onBusinessChange = () => {},
   columns,
   onColumnsChange,
   fontScale,
@@ -75,6 +81,25 @@ export default function PosHeader({
       operatorName={operatorName}
       controls={
         <>
+          {businesses.length > 1 ? (
+            <select
+              aria-label="Negocio activo"
+              value={activeBusinessId}
+              onChange={(event) => onBusinessChange(event.target.value)}
+              className="h-7 rounded-lg border border-border bg-background px-2 text-xs font-medium text-foreground"
+            >
+              {businesses.map((business) => (
+                <option key={business.id} value={business.id}>
+                  {business.name}
+                </option>
+              ))}
+            </select>
+          ) : businesses.length === 1 ? (
+            <Badge variant="outline" className="text-[10px]">
+              {businesses[0]?.name}
+            </Badge>
+          ) : null}
+
           <Button
             variant="outline"
             size="xs"

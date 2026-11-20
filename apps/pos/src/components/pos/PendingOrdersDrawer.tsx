@@ -46,6 +46,7 @@ interface PendingOrdersDrawerProps {
   loading: boolean;
   error: string;
   search: string;
+  businessId?: string;
   onSearch: (value: string) => void;
   onRetry: () => void;
   onClose: () => void;
@@ -58,6 +59,7 @@ export default function PendingOrdersDrawer({
   loading,
   error,
   search,
+  businessId = "",
   onSearch,
   onRetry,
   onClose,
@@ -120,7 +122,10 @@ export default function PendingOrdersDrawer({
   }
 
   const visibleOrders = orders.filter(
-    (order) => order.status !== "CANCELLED" && order.status !== "COMPLETED",
+    (order) =>
+      order.status !== "CANCELLED" &&
+      order.status !== "COMPLETED" &&
+      (!businessId || !order.business_id || order.business_id === businessId),
   );
 
   return (
