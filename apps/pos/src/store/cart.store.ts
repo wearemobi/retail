@@ -62,7 +62,8 @@ export const useCartStore = create<CartState>((set, get) => ({
             unitPrice: product.base_price ?? 0,
             quantity: incoming,
             unitOfMeasure: product.unit_of_measure,
-            isWeighted: isWeightedUnit(product.unit_of_measure),
+            // The product master is the source of truth; CAT-014 is only a fallback.
+            isWeighted: product.is_weighable ?? isWeightedUnit(product.unit_of_measure),
           },
         ],
       };

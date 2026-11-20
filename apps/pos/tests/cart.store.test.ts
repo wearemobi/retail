@@ -11,6 +11,7 @@ const unitProduct = {
   name: "Café molido",
   base_price: 15000,
   unit_of_measure: "59",
+  is_weighable: false,
 } as Product;
 
 const weightedProduct = {
@@ -18,6 +19,7 @@ const weightedProduct = {
   name: "Queso fresco",
   base_price: 10000,
   unit_of_measure: "36",
+  is_weighable: true,
 } as Product;
 
 beforeEach(() => {
@@ -51,6 +53,30 @@ describe("cart store — 10^-4 quantities", () => {
     expect(item.isWeighted).toBe(true);
     expect(item.quantity).toBe(2500);
     expect(cartLineTotal(item)).toBe(2500);
+  });
+
+  it("uses is_weighable from the product master over the CAT-014 heuristic", () => {
+    const integerWithWeightUom = {
+      sku: "SKU-SERVICE",
+      name: "Servicio por kg",
+      base_price: 5000,
+      unit_of_measure: "36",
+      is_weighable: false,
+    } as Product;
+    const decimalWithUnitUom = {
+      sku: "SKU-DECIMAL",
+      name: "Producto a granel",
+      base_price: 5000,
+      unit_of_measure: "59",
+      is_weighable: true,
+    } as Product;
+
+    useCartStore.getState().addItem(integerWithWeightUom);
+    useCartStore.getState().addItem(decimalWithUnitUom);
+
+    const items = useCartStore.getState().items;
+    expect(items.find((item) => item.sku === "SKU-SERVICE")?.isWeighted).toBe(false);
+    expect(items.find((item) => item.sku === "SKU-DECIMAL")?.isWeighted).toBe(true);
   });
 
   it("removes a line when the quantity reaches zero", () => {
