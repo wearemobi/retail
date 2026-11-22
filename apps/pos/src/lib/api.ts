@@ -235,6 +235,45 @@ export function newOrderIdempotencyKey(): string {
   return `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+export type CreatePresaleOrderRequest = {
+  business_id: string;
+  request_id: string;
+  organization_id?: string;
+  order_type: "DINE_IN" | "TAKEAWAY" | "DELIVERY" | "ECOMMERCE" | "CALL_CENTER";
+  source_channel?: "POS" | "WEB" | "KIOSK" | "PHONE" | "API" | "WHATSAPP" | "INSTAGRAM";
+  app_id?: string;
+  currency_code?: string;
+  customer_id?: string;
+  customer_name?: string;
+  customer_tax_id?: string;
+  emission_point?: string;
+  warehouse_id?: string;
+  notes?: string;
+  items: Array<{
+    sku: string;
+    name?: string;
+    quantity: number;
+    unit_price: number;
+    notes?: string;
+  }>;
+  payment_status?: string;
+};
+
+export async function createPresaleOrder(
+  payload: CreatePresaleOrderRequest,
+): Promise<Order> {
+  const { data, error } = await api.POST("/v1/orders", {
+    params: {
+      header: { "X-Tenant-Id": resolveTenantId() },
+    },
+    body: payload as any,
+  });
+  if (error || !data) {
+    throw new Error(parseApiError(error, "No se pudo crear la orden de preventa."));
+  }
+  return data;
+}
+
 export async function submitCheckout(
   payload: CheckoutRequest,
   idempotencyKey = newOrderIdempotencyKey(),
