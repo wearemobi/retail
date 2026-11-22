@@ -77,6 +77,56 @@ export interface Business {
   updated_at?: string;
 }
 
+// --- SPEC-W135 / WRTL4: Cash Shifts ---
+export type ShiftStatus = "OPEN" | "CLOSED";
+export type ShiftMovementType =
+  | "CASH_IN"
+  | "CASH_OUT"
+  | "SALE_CASH"
+  | "SALE_CARD"
+  | "SALE_TRANSFER";
+
+export interface CashShift {
+  id: string;
+  tenant_id?: string;
+  business_id?: string;
+  emission_point?: string;
+  operator_id?: string;
+  operator_name?: string;
+  status: ShiftStatus;
+  opening_cash: number;
+  cash_sales?: number;
+  card_sales?: number;
+  transfer_sales?: number;
+  cash_in?: number;
+  cash_out?: number;
+  expected_cash?: number;
+  counted_cash?: number | null;
+  difference_cash?: number | null;
+  notes?: string;
+  opened_at?: string;
+  closed_at?: string | null;
+  updated_at?: string;
+}
+
+export interface CashShiftMovement {
+  id?: string;
+  shift_id?: string;
+  tenant_id?: string;
+  movement_type: ShiftMovementType;
+  amount: number;
+  reason?: string;
+  reference?: string;
+  operator_id?: string;
+  created_at?: string;
+}
+
+export interface CashShiftReport {
+  shift: CashShift;
+  movements?: CashShiftMovement[];
+  movement_count?: number;
+}
+
 export const RETAIL_APP_ID = "ware-retail";
 
 export async function fetchCashiers(): Promise<Cashier[]> {
@@ -222,6 +272,85 @@ export async function submitOrderCheckout(
     throw new Error(parseApiError(error, "No se pudo liquidar la orden."));
   }
   return data;
+}
+
+// --- SPEC-WRTL4: shift API helpers (SPEC-W135 backend) ---
+async function shiftFetch<T>(path: string, init: RequestInit = {}, fallback: string): Promise<T> {
+  const token = useAuthStore.getState().token;
+  const headers = new Headers(init.headers);
+  headers.set("X-Tenant-Id", resolveTenantId());
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  if (response.status === 401) {
+    useAuthStore.getState().logout();
+  }
+  const text = await response.text();
+  const data = text ? (JSON.parse(text) as unknown) : null;
+  if (!response.ok) {
+    throw new Error(parseApiError(data, fallback));
+  }
+  return data as T;
+}
+
+export async function fetchCurrentShift(
+  operatorId: string,
+  emissionPoint = EMISSION_POINT,
+): Promise<CashShift | null> {
+  const qs = new URLSearchParams({ operator_id: operatorId, emission_point: emissionPoint });
+  const token = useAuthStore.getState().token;
+  const headers = new Headers({ "X-Tenant-Id": resolveTenantId() });
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_BASE_URL}/v1/shifts/current?${qs.toString()}`, { headers });
+  if (response.status === 404) return null;
+  if (response.status === 401) useAuthStore.getState().logout();
+  const text = await response.text();
+  const data = text ? (JSON.parse(text) as unknown) : null;
+  if (!response.ok) throw new Error(parseApiError(data, "No se pudo consultar el turno actual."));
+  return data as CashShift;
+}
+
+export async function openShift(input: {
+  business_id?: string;
+  emission_point?: string;
+  operator_id: string;
+  operator_name: string;
+  opening_cash: number;
+  notes?: string;
+}): Promise<CashShift> {
+  return shiftFetch<CashShift>("/v1/shifts/open", { method: "POST", body: JSON.stringify(input) }, "No se pudo abrir el turno.");
+}
+
+export async function recordShiftMovement(
+  shiftId: string,
+  input: {
+    movement_type: "CASH_IN" | "CASH_OUT";
+    amount: number;
+    reason: string;
+    reference?: string;
+    operator_id?: string;
+  },
+): Promise<{ shift: CashShift; movement: CashShiftMovement }> {
+  return shiftFetch<{ shift: CashShift; movement: CashShiftMovement }>(
+    `/v1/shifts/${shiftId}/movements`,
+    { method: "POST", body: JSON.stringify(input) },
+    "No se pudo registrar el movimiento.",
+  );
+}
+
+export async function fetchShiftReport(shiftId: string): Promise<CashShiftReport> {
+  return shiftFetch<CashShiftReport>(`/v1/shifts/${shiftId}/report`, {}, "No se pudo obtener el corte de caja.");
+}
+
+export async function closeShift(
+  shiftId: string,
+  input: { counted_cash: number; notes?: string },
+): Promise<{ shift: CashShift; report: CashShiftReport }> {
+  return shiftFetch<{ shift: CashShift; report: CashShiftReport }>(
+    `/v1/shifts/${shiftId}/close`,
+    { method: "POST", body: JSON.stringify(input) },
+    "No se pudo cerrar el turno.",
+  );
 }
 
 export function newOrderIdempotencyKey(): string {

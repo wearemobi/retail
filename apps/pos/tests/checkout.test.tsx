@@ -7,6 +7,7 @@ import CheckoutDialog from "../src/components/pos/CheckoutDialog";
 vi.mock("../src/lib/api", () => ({
   EMISSION_POINT: "POS-01",
   WAREHOUSE_ID: "WH-MAIN",
+  resolveTenantId: () => "tenant_demo",
   submitCheckout: vi.fn(),
   fetchCustomers: vi.fn(),
 }));
