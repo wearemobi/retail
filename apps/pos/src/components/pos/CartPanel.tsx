@@ -1,4 +1,5 @@
-import { ShoppingCart, Trash2, X } from "lucide-react";
+import { useState } from "react";
+import { ShoppingCart, Trash2, X, Send } from "lucide-react";
 import { Button, QuantityStepper } from "@retail/common";
 import {
   formatScaledMoney,
@@ -13,6 +14,15 @@ import {
   useCartStore,
   type CartItem,
 } from "../../store/cart.store";
+import { useAuthStore, storedBusinessId } from "../../store/auth";
+import {
+  createPresaleOrder,
+  EMISSION_POINT,
+  newOrderIdempotencyKey,
+  resolveTenantId,
+  WAREHOUSE_ID,
+} from "../../lib/api";
+import PresaleConfirmDialog from "./PresaleConfirmDialog";
 
 interface CartPanelProps {
   items: CartItem[];
@@ -30,6 +40,47 @@ export default function CartPanel({
   const setQuantity = useCartStore((state) => state.setQuantity);
   const removeItem = useCartStore((state) => state.removeItem);
   const subtotal = cartSubtotal(items);
+  const clear = useCartStore((state) => state.clear);
+
+  async function handlePresale() {
+    if (items.length === 0 || presaleSubmitting) return;
+    setPresaleSubmitting(true);
+    setPresaleError("");
+    try {
+      const businessId =
+        useAuthStore.getState().businessId ||
+        storedBusinessId(resolveTenantId());
+      const order = await createPresaleOrder({
+        business_id: businessId,
+        request_id: newOrderIdempotencyKey(),
+        order_type: "TAKEAWAY",
+        source_channel: "POS",
+        app_id: "ware-retail",
+        currency_code: "USD",
+        emission_point: EMISSION_POINT,
+        warehouse_id: WAREHOUSE_ID,
+        items: items.map((item) => ({
+          sku: item.sku,
+          name: item.name,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+        })),
+        payment_status: "UNPAID",
+      } as any);
+      setPresaleDisplayId(order.display_id ?? order.id ?? "");
+      setPresaleOpen(true);
+      clear();
+    } catch (err) {
+      setPresaleError(err instanceof Error ? err.message : "No se pudo enviar a caja.");
+    } finally {
+      setPresaleSubmitting(false);
+    }
+  }
+
+  const [presaleOpen, setPresaleOpen] = useState(false);
+  const [presaleDisplayId, setPresaleDisplayId] = useState("");
+  const [presaleSubmitting, setPresaleSubmitting] = useState(false);
+  const [presaleError, setPresaleError] = useState("");
 
   const content = (
     <div className="flex h-full min-h-0 flex-col">
@@ -123,15 +174,35 @@ export default function CartPanel({
             {formatScaledMoney(subtotal)}
           </span>
         </div>
-        <Button
-          variant="accent"
-          size="lg"
-          className="w-full"
-          disabled={items.length === 0}
-          onClick={onCheckout}
-        >
-          Cobrar
-        </Button>
+        {presaleError && (
+          <p className="mb-2 text-xs text-destructive">{presaleError}</p>
+        )}
+        <div className="flex gap-2">
+          <Button
+            variant="accent"
+            size="lg"
+            className="flex-1"
+            disabled={items.length === 0}
+            onClick={onCheckout}
+          >
+            Cobrar
+          </Button>
+          <Button
+            variant="outline"
+            size="lg"
+            className="flex-1"
+            disabled={items.length === 0 || presaleSubmitting}
+            onClick={() => void handlePresale()}
+          >
+            <Send className="h-4 w-4" aria-hidden="true" />
+            {presaleSubmitting ? "Enviando…" : "Enviar a Caja"}
+          </Button>
+        </div>
+        <PresaleConfirmDialog
+          open={presaleOpen}
+          displayId={presaleDisplayId}
+          onClose={() => setPresaleOpen(false)}
+        />
       </div>
     </div>
   );
