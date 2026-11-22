@@ -15,12 +15,14 @@ import {
   submitCheckout,
   submitOrderCheckout,
   resolveTenantId,
+  isApiNetworkError,
   type CheckoutRequest,
   type Customer,
   type Order,
   type OrderCheckoutRequest,
   type OrderItem,
 } from "../../lib/api";
+import { enqueueOfflineSale } from "../../lib/offlineStore";
 import {
   cartLineTotal,
 } from "../../store/cart.store";
@@ -60,6 +62,8 @@ interface CheckoutSuccess {
   customerTaxId?: string;
   paymentLabel: string;
   issuedAt: string;
+  contingency?: boolean;
+  idempotencyKey?: string;
 }
 
 interface CheckoutDialogProps {
@@ -159,6 +163,9 @@ export default function CheckoutDialog({
     setError("");
 
     const changeOnSuccess = changeDue;
+    const idempotencyKey = newOrderIdempotencyKey();
+    const paymentLabel = PAYMENT_METHODS.find((m) => m.code === paymentMethod)?.label ?? paymentMethod;
+    const tenantId = resolveTenantId();
 
     try {
       if (orderMode && activeOrder?.id) {
@@ -182,38 +189,66 @@ export default function CheckoutDialog({
           };
         }
 
-        const response = await submitOrderCheckout(
-          activeOrder.id,
-          payload,
-          newOrderIdempotencyKey(),
-        );
-        const paymentLabel = PAYMENT_METHODS.find((m) => m.code === paymentMethod)?.label ?? paymentMethod;
-        setSuccess({
-          orderId: response.order_id ?? activeOrder.id,
-          displayId: response.display_id ?? activeOrder.display_id,
-          folio: response.folio_number,
-          generationCode: response.fiscal_document?.generation_code,
-          mhStatus: response.fiscal_document?.mh_status,
-          totalPaid: response.total_paid
-            ? toScaledNumber(response.total_paid)
-            : activeTotal,
-          changeDue: response.change_amount
-            ? toScaledNumber(response.change_amount)
-            : changeOnSuccess,
-          receiptItems: orderItems.map((it) => ({
-            description: it.name ?? it.sku ?? "Ítem",
-            quantity: it.quantity ?? 0,
-            unitPrice: it.unit_price ?? 0,
-            lineTotal: it.line_total ?? Math.round(((it.quantity ?? 0) * (it.unit_price ?? 0)) / 10000),
-          })),
-          documentType,
-          customerName: customer?.legal_name,
-          customerTaxId: customer?.tax_id,
-          paymentLabel,
-          issuedAt: new Date().toISOString(),
-        });
-        onCompleted();
-        return;
+        const receiptItems = orderItems.map((it) => ({
+          description: it.name ?? it.sku ?? "Ítem",
+          quantity: it.quantity ?? 0,
+          unitPrice: it.unit_price ?? 0,
+          lineTotal: it.line_total ?? Math.round(((it.quantity ?? 0) * (it.unit_price ?? 0)) / 10000),
+        }));
+
+        try {
+          const response = await submitOrderCheckout(activeOrder.id, payload, idempotencyKey);
+          setSuccess({
+            orderId: response.order_id ?? activeOrder.id,
+            displayId: response.display_id ?? activeOrder.display_id,
+            folio: response.folio_number,
+            generationCode: response.fiscal_document?.generation_code,
+            mhStatus: response.fiscal_document?.mh_status,
+            totalPaid: response.total_paid ? toScaledNumber(response.total_paid) : activeTotal,
+            changeDue: response.change_amount ? toScaledNumber(response.change_amount) : changeOnSuccess,
+            receiptItems,
+            documentType,
+            customerName: customer?.legal_name,
+            customerTaxId: customer?.tax_id,
+            paymentLabel,
+            issuedAt: new Date().toISOString(),
+          });
+          onCompleted();
+          return;
+        } catch (err) {
+          if (!isApiNetworkError(err)) throw err;
+          enqueueOfflineSale(tenantId, {
+            idempotencyKey,
+            tenantId,
+            kind: "ORDER_CHECKOUT",
+            orderId: activeOrder.id,
+            payload,
+            total: activeTotal,
+            customerName: customer?.legal_name ?? activeOrder.customer_name,
+            customerTaxId: customer?.tax_id,
+            documentType,
+            paymentLabel,
+            receiptItems,
+            createdAt: new Date().toISOString(),
+            status: "PENDING",
+          });
+          setSuccess({
+            orderId: activeOrder.id,
+            displayId: activeOrder.display_id,
+            totalPaid: isCash && tenderedScaled !== null ? tenderedScaled : activeTotal,
+            changeDue: changeOnSuccess,
+            receiptItems,
+            documentType,
+            customerName: customer?.legal_name ?? activeOrder.customer_name,
+            customerTaxId: customer?.tax_id,
+            paymentLabel,
+            issuedAt: new Date().toISOString(),
+            contingency: true,
+            idempotencyKey,
+          });
+          onCompleted();
+          return;
+        }
       }
 
       const body: CheckoutRequest = {
@@ -235,30 +270,62 @@ export default function CheckoutDialog({
         body.customer_id = String(customer.id);
       }
 
-      const response = await submitCheckout(body);
-      const paymentLabel = PAYMENT_METHODS.find((m) => m.code === paymentMethod)?.label ?? paymentMethod;
-      const raw = response as Record<string, unknown>;
-      setSuccess({
-        orderId: response.order_id,
-        folio: response.folio_number,
-        controlNumber: response.control_number,
-        generationCode: typeof raw.generation_code === "string" ? raw.generation_code : undefined,
-        mhStatus: typeof raw.mh_status === "string" ? raw.mh_status : undefined,
-        totalPaid: response.total_paid ?? total,
-        changeDue: changeOnSuccess,
-        receiptItems: items.map((item) => ({
-          description: item.name,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          lineTotal: cartLineTotal(item),
-        })),
-        documentType,
-        customerName: customer?.legal_name,
-        customerTaxId: customer?.tax_id,
-        paymentLabel,
-        issuedAt: new Date().toISOString(),
-      });
-      onCompleted();
+      const receiptItems = items.map((item) => ({
+        description: item.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        lineTotal: cartLineTotal(item),
+      }));
+
+      try {
+        const response = await submitCheckout(body, idempotencyKey);
+        const raw = response as Record<string, unknown>;
+        setSuccess({
+          orderId: response.order_id,
+          folio: response.folio_number,
+          controlNumber: response.control_number,
+          generationCode: typeof raw.generation_code === "string" ? raw.generation_code : undefined,
+          mhStatus: typeof raw.mh_status === "string" ? raw.mh_status : undefined,
+          totalPaid: response.total_paid ?? total,
+          changeDue: changeOnSuccess,
+          receiptItems,
+          documentType,
+          customerName: customer?.legal_name,
+          customerTaxId: customer?.tax_id,
+          paymentLabel,
+          issuedAt: new Date().toISOString(),
+        });
+        onCompleted();
+      } catch (err) {
+        if (!isApiNetworkError(err)) throw err;
+        enqueueOfflineSale(tenantId, {
+          idempotencyKey,
+          tenantId,
+          kind: "POS_CHECKOUT",
+          payload: body,
+          total,
+          customerName: customer?.legal_name,
+          customerTaxId: customer?.tax_id,
+          documentType,
+          paymentLabel,
+          receiptItems,
+          createdAt: new Date().toISOString(),
+          status: "PENDING",
+        });
+        setSuccess({
+          totalPaid: isCash && tenderedScaled !== null ? tenderedScaled : total,
+          changeDue: changeOnSuccess,
+          receiptItems,
+          documentType,
+          customerName: customer?.legal_name,
+          customerTaxId: customer?.tax_id,
+          paymentLabel,
+          issuedAt: new Date().toISOString(),
+          contingency: true,
+          idempotencyKey,
+        });
+        onCompleted();
+      }
     } catch (err) {
       setError(
         err instanceof Error
@@ -320,8 +387,22 @@ export default function CheckoutDialog({
             <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-700 dark:text-emerald-400">
               <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
               <div className="flex flex-col gap-0.5">
-                <p className="text-sm font-bold">{orderMode ? "Orden liquidada" : "Venta procesada"}</p>
-                <p className="text-xs">Total cobrado: {formatScaledMoney(success.totalPaid)}{success.changeDue > 0 ? ` · Cambio: ${formatScaledMoney(success.changeDue)}` : ""}</p>
+                <p className="text-sm font-bold">
+                  {success.contingency
+                    ? "Venta en contingencia"
+                    : orderMode
+                      ? "Orden liquidada"
+                      : "Venta procesada"}
+                </p>
+                <p className="text-xs">
+                  {success.contingency
+                    ? "PENDIENTE DE SINCRONIZACIÓN · se enviará al recuperar conexión"
+                    : `Total cobrado: ${formatScaledMoney(success.totalPaid)}${success.changeDue > 0 ? ` · Cambio: ${formatScaledMoney(success.changeDue)}` : ""}`}
+                </p>
+                {success.contingency && (
+                  <p className="text-xs">Total: {formatScaledMoney(success.totalPaid)}{success.changeDue > 0 ? ` · Cambio: ${formatScaledMoney(success.changeDue)}` : ""}</p>
+                )}
+                {success.idempotencyKey && <p className="text-[11px] font-mono break-all">Idempotency: {success.idempotencyKey}</p>}
                 {typeof success.folio === "number" && <p className="text-xs">Folio: #{success.folio}</p>}
                 {success.generationCode && <p className="text-xs break-all">Generación: {success.generationCode}</p>}
                 {success.controlNumber && <p className="text-xs break-all">Control: {success.controlNumber}</p>}

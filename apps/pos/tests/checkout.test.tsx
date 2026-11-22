@@ -8,8 +8,13 @@ vi.mock("../src/lib/api", () => ({
   EMISSION_POINT: "POS-01",
   WAREHOUSE_ID: "WH-MAIN",
   resolveTenantId: () => "tenant_demo",
+  newOrderIdempotencyKey: () => "idem-test",
+  isApiNetworkError: () => false,
   submitCheckout: vi.fn(),
   fetchCustomers: vi.fn(),
+}));
+vi.mock("../src/lib/offlineStore", () => ({
+  enqueueOfflineSale: vi.fn(),
 }));
 
 const items: CartItem[] = [
