@@ -9,6 +9,17 @@ import {
   type paths,
 } from "@retail/common";
 import { useAuthStore } from "../store/auth";
+import {
+  cacheCatalog,
+  cacheCustomers,
+  getCachedCatalog,
+  getCachedCustomers,
+  isNetworkError,
+  listOfflineSales,
+  markOfflineSaleError,
+  removeOfflineSale,
+  type OfflineSaleRecord,
+} from "./offlineStore";
 
 export const TENANT_STORAGE_KEY = "ware-pos.tenant";
 export const WAREHOUSE_ID = "WH-MAIN";
@@ -139,22 +150,42 @@ export async function loginWithPin(username: string, pin: string): Promise<PinLo
 
 export async function fetchProducts(search = ""): Promise<Product[]> {
   const term = search.trim();
-  const { data, error } = await api.GET("/v1/inventory/products", {
-    params: {
-      header: { "X-Tenant-Id": resolveTenantId() },
-      query: {
-        warehouse_id: WAREHOUSE_ID,
-        vertical: "RETAIL",
-        size: 200,
-        sort: "name,asc",
-        ...(term ? { search: term } : {}),
-      },
-    },
-  });
-  if (error || !data) {
-    throw new Error(parseApiError(error, "No fue posible cargar el catálogo de productos."));
+  const tenantId = resolveTenantId();
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return getCachedCatalog(tenantId, term);
   }
-  return (data.items ?? []).filter((product) => product.is_active !== false);
+  try {
+    const { data, error } = await api.GET("/v1/inventory/products", {
+      params: {
+        header: { "X-Tenant-Id": tenantId },
+        query: {
+          warehouse_id: WAREHOUSE_ID,
+          vertical: "RETAIL",
+          size: 200,
+          sort: "name,asc",
+          ...(term ? { search: term } : {}),
+        },
+      },
+    });
+    if (error || !data) {
+      throw new Error(parseApiError(error, "No fue posible cargar el catálogo de productos."));
+    }
+    const items = (data.items ?? []).filter((product) => product.is_active !== false);
+    // Cache the unfiltered full fetch; search fetches also warm cache opportunistically.
+    if (!term) cacheCatalog(tenantId, items);
+    else if (items.length > 0) {
+      const existing = getCachedCatalog(tenantId, "");
+      const map = new Map(existing.map((p) => [p.sku ?? "", p]));
+      for (const p of items) map.set(p.sku ?? "", p);
+      cacheCatalog(tenantId, Array.from(map.values()));
+    }
+    return items;
+  } catch (err) {
+    if (isNetworkError(err)) {
+      return getCachedCatalog(tenantId, term);
+    }
+    throw err;
+  }
 }
 
 export async function fetchProductBySku(sku: string): Promise<Product | null> {
@@ -172,31 +203,47 @@ export async function fetchProductBySku(sku: string): Promise<Product | null> {
 export async function fetchCustomers(search: string): Promise<Customer[]> {
   const term = search.trim();
   if (term.length < 2) return [];
-  const { data, error } = await api.GET("/v1/customers", {
-    params: {
-      header: { "X-Tenant-Id": resolveTenantId() },
-      query: { search: term, size: 8, sort: "legal_name,asc" },
-    },
-  });
-  if (error || !data) {
-    throw new Error(parseApiError(error, "No fue posible buscar clientes."));
+  const tenantId = resolveTenantId();
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return getCachedCustomers(tenantId, term);
   }
-  return data.items ?? data.customers ?? [];
+  try {
+    const { data, error } = await api.GET("/v1/customers", {
+      params: {
+        header: { "X-Tenant-Id": tenantId },
+        query: { search: term, size: 8, sort: "legal_name,asc" },
+      },
+    });
+    if (error || !data) {
+      throw new Error(parseApiError(error, "No fue posible buscar clientes."));
+    }
+    const items = data.items ?? data.customers ?? [];
+    cacheCustomers(tenantId, term, items);
+    return items;
+  } catch (err) {
+    if (isNetworkError(err)) {
+      return getCachedCustomers(tenantId, term);
+    }
+    throw err;
+  }
 }
 
-function newIdempotencyKey(): string {
+export function newOrderIdempotencyKey(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export async function submitCheckout(payload: CheckoutRequest): Promise<CheckoutResponse> {
+export async function submitCheckout(
+  payload: CheckoutRequest,
+  idempotencyKey = newOrderIdempotencyKey(),
+): Promise<CheckoutResponse> {
   const { data, error } = await api.POST("/v1/pos/checkout", {
     params: {
       header: {
         "X-Tenant-Id": resolveTenantId(),
-        "Idempotency-Key": newIdempotencyKey(),
+        "Idempotency-Key": idempotencyKey,
       },
     },
     body: payload,
@@ -353,9 +400,7 @@ export async function closeShift(
   );
 }
 
-export function newOrderIdempotencyKey(): string {
-  return newIdempotencyKey();
-}
+
 
 /** GET /v1/orders/businesses (the OpenAPI document only types POST today). */
 export async function fetchBusinesses(): Promise<Business[]> {
@@ -369,3 +414,37 @@ export async function fetchBusinesses(): Promise<Business[]> {
   if (Array.isArray(data?.items)) return data.items as Business[];
   return [];
 }
+
+
+export function isApiNetworkError(err: unknown): boolean {
+  return isNetworkError(err);
+}
+
+export async function syncOfflineSalesQueue(
+  tenantId = resolveTenantId(),
+): Promise<{ synced: number; remaining: number; errors: string[] }> {
+  const records = listOfflineSales(tenantId);
+  let synced = 0;
+  const errors: string[] = [];
+  for (const record of records) {
+    try {
+      if (record.kind === "POS_CHECKOUT") {
+        await submitCheckout(record.payload as CheckoutRequest, record.idempotencyKey);
+      } else if (record.kind === "ORDER_CHECKOUT" && record.orderId) {
+        await submitOrderCheckout(record.orderId, record.payload as OrderCheckoutRequest, record.idempotencyKey);
+      } else {
+        throw new Error("Registro offline inválido.");
+      }
+      removeOfflineSale(tenantId, record.idempotencyKey);
+      synced += 1;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Error de sincronización";
+      markOfflineSaleError(tenantId, record.idempotencyKey, message);
+      errors.push(message);
+      if (isNetworkError(err)) break;
+    }
+  }
+  return { synced, remaining: listOfflineSales(tenantId).length, errors };
+}
+
+export type { OfflineSaleRecord };

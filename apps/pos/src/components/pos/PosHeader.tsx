@@ -1,4 +1,4 @@
-import { Search, ShoppingBag, Store, Wallet } from "lucide-react";
+import { CloudOff, Search, ShoppingBag, Store, Wallet, Wifi } from "lucide-react";
 import {
   Badge,
   Button,
@@ -36,6 +36,9 @@ interface PosHeaderProps {
   onBusinessChange?: (businessId: string) => void;
   currentShift?: CashShift | null;
   onOpenShift?: () => void;
+  isOnline?: boolean;
+  offlineQueueCount?: number;
+  onOpenOfflineQueue?: () => void;
   columns: PosColumnCount;
   onColumnsChange: (columns: PosColumnCount) => void;
   fontScale: PosFontScale;
@@ -57,6 +60,9 @@ export default function PosHeader({
   onBusinessChange = () => {},
   currentShift = null,
   onOpenShift = () => {},
+  isOnline = true,
+  offlineQueueCount = 0,
+  onOpenOfflineQueue = () => {},
   columns,
   onColumnsChange,
   fontScale,
@@ -104,6 +110,23 @@ export default function PosHeader({
               {businesses[0]?.name}
             </Badge>
           ) : null}
+
+          <Button
+            variant={isOnline ? "outline" : "destructive"}
+            size="xs"
+            onClick={onOpenOfflineQueue}
+            className="h-7 gap-1.5"
+            aria-label={isOnline ? `Online, ${offlineQueueCount} en cola` : `Offline, ${offlineQueueCount} en cola`}
+            title={isOnline ? "Conectividad" : "Modo contingencia offline"}
+          >
+            {isOnline ? <Wifi className="h-3.5 w-3.5" aria-hidden="true" /> : <CloudOff className="h-3.5 w-3.5" aria-hidden="true" />}
+            <span>{isOnline ? "Online" : "Offline · Contingencia"}</span>
+            {offlineQueueCount > 0 && (
+              <Badge variant={isOnline ? "accent" : "secondary"} className="text-[10px]">
+                {offlineQueueCount}
+              </Badge>
+            )}
+          </Button>
 
           <Button
             variant={shiftOpen ? "outline" : "accent"}

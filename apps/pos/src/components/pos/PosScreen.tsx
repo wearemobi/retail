@@ -7,11 +7,14 @@ import {
   fetchProductBySku,
   fetchProducts,
   resolveTenantId,
+  syncOfflineSalesQueue,
   type Business,
+  type OfflineSaleRecord,
   type Order,
   type OrderItem,
   type Product,
 } from "../../lib/api";
+import { listOfflineSales } from "../../lib/offlineStore";
 import { storedBusinessId, useAuthStore } from "../../store/auth";
 import { cartSubtotal, useCartStore } from "../../store/cart.store";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -20,6 +23,7 @@ import CartPanel from "./CartPanel";
 import CheckoutDialog from "./CheckoutDialog";
 import PendingOrdersDrawer from "./PendingOrdersDrawer";
 import ShiftDrawerDialog from "./ShiftDrawerDialog";
+import OfflineQueueDrawer from "./OfflineQueueDrawer";
 import PosHeader, {
   scaleMultiplier,
   type PosColumnCount,
@@ -63,6 +67,10 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [shiftOpen, setShiftOpen] = useState(false);
   const [currentShift, setCurrentShift] = useState<import("../../lib/api").CashShift | null>(null);
+  const [offlineOpen, setOfflineOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
+  const [offlineQueue, setOfflineQueue] = useState<OfflineSaleRecord[]>([]);
+  const [syncingOffline, setSyncingOffline] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState("");
@@ -86,6 +94,10 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
     (order) => order.status !== "CANCELLED" && order.status !== "COMPLETED",
   ).length;
 
+  const refreshOfflineQueue = () => {
+    setOfflineQueue(listOfflineSales(resolveTenantId()));
+  };
+
   // Load current cash shift for operator (SPEC-WRTL4).
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +107,26 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
       fetchCurrentShift(opId).then((shift) => { if (!cancelled) setCurrentShift(shift); }).catch(() => {});
     });
     return () => { cancelled = true; };
+  }, []);
+
+  // SPEC-WRTL5: offline queue + connectivity sync.
+  useEffect(() => {
+    refreshOfflineQueue();
+    const onOnline = () => {
+      setIsOnline(true);
+      void syncOfflineSalesQueue().then(() => refreshOfflineQueue());
+    };
+    const onOffline = () => {
+      setIsOnline(false);
+      refreshOfflineQueue();
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Resolve the active business: ?b= from the QR wins, then the persisted
@@ -205,11 +237,22 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   }
 
   function handleCheckoutCompleted() {
+    refreshOfflineQueue();
     if (activeOrder) {
       setOrdersRefreshToken((token) => token + 1);
       return;
     }
     clear();
+  }
+
+  async function handleSyncOffline() {
+    setSyncingOffline(true);
+    try {
+      await syncOfflineSalesQueue();
+    } finally {
+      refreshOfflineQueue();
+      setSyncingOffline(false);
+    }
   }
 
   function refreshOrders() {
@@ -250,6 +293,9 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         onBusinessChange={setBusinessId}
         currentShift={currentShift}
         onOpenShift={() => setShiftOpen(true)}
+        isOnline={isOnline}
+        offlineQueueCount={offlineQueue.length}
+        onOpenOfflineQueue={() => setOfflineOpen(true)}
         columns={columns}
         onColumnsChange={setColumns}
         fontScale={fontScale}
@@ -347,6 +393,14 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         open={shiftOpen}
         onClose={() => setShiftOpen(false)}
         onShiftChange={setCurrentShift}
+      />
+
+      <OfflineQueueDrawer
+        open={offlineOpen}
+        records={offlineQueue}
+        syncing={syncingOffline}
+        onClose={() => setOfflineOpen(false)}
+        onSync={() => void handleSyncOffline()}
       />
     </div>
   );
