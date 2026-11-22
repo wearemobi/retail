@@ -13,6 +13,7 @@ import PendingOrdersDrawer from "./PendingOrdersDrawer";
 vi.mock("../../lib/api", () => ({
   EMISSION_POINT: "POS-01",
   WAREHOUSE_ID: "WH-MAIN",
+  resolveTenantId: () => "tenant_demo",
   fetchOrderDetail: vi.fn(),
   fetchCustomers: vi.fn(),
   submitCheckout: vi.fn(),
@@ -229,7 +230,7 @@ describe("CheckoutDialog — order checkout (SPEC-WRTL2)", () => {
 
     expect(await screen.findByText("Orden liquidada")).toBeInTheDocument();
     expect(screen.getByText(/Folio: #108/)).toBeInTheDocument();
-    expect(screen.getByText(/GEN-108/)).toBeInTheDocument();
+    expect(screen.getAllByText(/GEN-108/).length).toBeGreaterThan(0);
     expect(onCompleted).toHaveBeenCalledTimes(1);
   });
 

@@ -19,6 +19,7 @@ import CatalogGrid from "./CatalogGrid";
 import CartPanel from "./CartPanel";
 import CheckoutDialog from "./CheckoutDialog";
 import PendingOrdersDrawer from "./PendingOrdersDrawer";
+import ShiftDrawerDialog from "./ShiftDrawerDialog";
 import PosHeader, {
   scaleMultiplier,
   type PosColumnCount,
@@ -60,6 +61,8 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
+  const [shiftOpen, setShiftOpen] = useState(false);
+  const [currentShift, setCurrentShift] = useState<import("../../lib/api").CashShift | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState("");
@@ -82,6 +85,17 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const pendingOrdersCount = orders.filter(
     (order) => order.status !== "CANCELLED" && order.status !== "COMPLETED",
   ).length;
+
+  // Load current cash shift for operator (SPEC-WRTL4).
+  useEffect(() => {
+    let cancelled = false;
+    import("../../lib/api").then(({ fetchCurrentShift }) => {
+      const opId = useAuthStore.getState().operatorId;
+      if (!opId) return;
+      fetchCurrentShift(opId).then((shift) => { if (!cancelled) setCurrentShift(shift); }).catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Resolve the active business: ?b= from the QR wins, then the persisted
   // per-tenant selection, then the first active business (SPEC-WRTL3).
@@ -234,6 +248,8 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         businesses={businesses}
         activeBusinessId={activeBusinessId}
         onBusinessChange={setBusinessId}
+        currentShift={currentShift}
+        onOpenShift={() => setShiftOpen(true)}
         columns={columns}
         onColumnsChange={setColumns}
         fontScale={fontScale}
@@ -325,6 +341,12 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         orderItems={activeOrderItems}
         onClose={closeCheckout}
         onCompleted={handleCheckoutCompleted}
+      />
+
+      <ShiftDrawerDialog
+        open={shiftOpen}
+        onClose={() => setShiftOpen(false)}
+        onShiftChange={setCurrentShift}
       />
     </div>
   );

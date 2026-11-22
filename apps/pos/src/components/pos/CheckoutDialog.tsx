@@ -14,6 +14,7 @@ import {
   newOrderIdempotencyKey,
   submitCheckout,
   submitOrderCheckout,
+  resolveTenantId,
   type CheckoutRequest,
   type Customer,
   type Order,
@@ -21,12 +22,17 @@ import {
   type OrderItem,
 } from "../../lib/api";
 import {
+  cartLineTotal,
+} from "../../store/cart.store";
+import {
   formatScaledMoney,
   fromScaled,
   parseMoneyInput,
 } from "../../lib/quantity";
 import type { CartItem } from "../../store/cart.store";
+import { useAuthStore } from "../../store/auth";
 import CustomerSelector from "./CustomerSelector";
+import ThermalReceiptPrint, { type ThermalPaperWidth } from "./ThermalReceiptPrint";
 
 type DocumentType = "01" | "03";
 type PaymentMethod = "01" | "02" | "03" | "04" | "05";
@@ -48,6 +54,12 @@ interface CheckoutSuccess {
   mhStatus?: string;
   totalPaid: number;
   changeDue: number;
+  receiptItems: { description: string; quantity: number; unitPrice: number; lineTotal: number }[];
+  documentType: DocumentType;
+  customerName?: string;
+  customerTaxId?: string;
+  paymentLabel: string;
+  issuedAt: string;
 }
 
 interface CheckoutDialogProps {
@@ -79,6 +91,13 @@ function orderPaymentMethod(
   return "CASH";
 }
 
+function toScaledNumber(value: string | number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  // Order checkout totals are decimal strings (e.g. "45.2000") in API.
+  return Math.round(n * 10000);
+}
+
 export default function CheckoutDialog({
   open,
   items,
@@ -98,6 +117,8 @@ export default function CheckoutDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<CheckoutSuccess | null>(null);
+  const [receiptWidth, setReceiptWidth] = useState<ThermalPaperWidth>("80mm");
+  const operatorName = useAuthStore((s) => s.operatorName);
 
   const openOrderId = activeOrder?.id;
 
@@ -166,6 +187,7 @@ export default function CheckoutDialog({
           payload,
           newOrderIdempotencyKey(),
         );
+        const paymentLabel = PAYMENT_METHODS.find((m) => m.code === paymentMethod)?.label ?? paymentMethod;
         setSuccess({
           orderId: response.order_id ?? activeOrder.id,
           displayId: response.display_id ?? activeOrder.display_id,
@@ -173,11 +195,22 @@ export default function CheckoutDialog({
           generationCode: response.fiscal_document?.generation_code,
           mhStatus: response.fiscal_document?.mh_status,
           totalPaid: response.total_paid
-            ? fromScaled(Number(response.total_paid))
+            ? toScaledNumber(response.total_paid)
             : activeTotal,
           changeDue: response.change_amount
-            ? fromScaled(Number(response.change_amount))
+            ? toScaledNumber(response.change_amount)
             : changeOnSuccess,
+          receiptItems: orderItems.map((it) => ({
+            description: it.name ?? it.sku ?? "Ítem",
+            quantity: it.quantity ?? 0,
+            unitPrice: it.unit_price ?? 0,
+            lineTotal: it.line_total ?? Math.round(((it.quantity ?? 0) * (it.unit_price ?? 0)) / 10000),
+          })),
+          documentType,
+          customerName: customer?.legal_name,
+          customerTaxId: customer?.tax_id,
+          paymentLabel,
+          issuedAt: new Date().toISOString(),
         });
         onCompleted();
         return;
@@ -203,12 +236,27 @@ export default function CheckoutDialog({
       }
 
       const response = await submitCheckout(body);
+      const paymentLabel = PAYMENT_METHODS.find((m) => m.code === paymentMethod)?.label ?? paymentMethod;
+      const raw = response as Record<string, unknown>;
       setSuccess({
         orderId: response.order_id,
         folio: response.folio_number,
         controlNumber: response.control_number,
+        generationCode: typeof raw.generation_code === "string" ? raw.generation_code : undefined,
+        mhStatus: typeof raw.mh_status === "string" ? raw.mh_status : undefined,
         totalPaid: response.total_paid ?? total,
         changeDue: changeOnSuccess,
+        receiptItems: items.map((item) => ({
+          description: item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          lineTotal: cartLineTotal(item),
+        })),
+        documentType,
+        customerName: customer?.legal_name,
+        customerTaxId: customer?.tax_id,
+        paymentLabel,
+        issuedAt: new Date().toISOString(),
       });
       onCompleted();
     } catch (err) {
@@ -268,39 +316,43 @@ export default function CheckoutDialog({
         </div>
 
         {success ? (
-          <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-500">
-              <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+            <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+              <div className="flex flex-col gap-0.5">
+                <p className="text-sm font-bold">{orderMode ? "Orden liquidada" : "Venta procesada"}</p>
+                <p className="text-xs">Total cobrado: {formatScaledMoney(success.totalPaid)}{success.changeDue > 0 ? ` · Cambio: ${formatScaledMoney(success.changeDue)}` : ""}</p>
+                {typeof success.folio === "number" && <p className="text-xs">Folio: #{success.folio}</p>}
+                {success.generationCode && <p className="text-xs break-all">Generación: {success.generationCode}</p>}
+                {success.controlNumber && <p className="text-xs break-all">Control: {success.controlNumber}</p>}
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <h3 className="text-base font-bold">
-                {orderMode ? "Orden liquidada" : "Venta procesada"}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                {success.controlNumber
-                  ? `Comprobante: ${success.controlNumber}`
-                  : success.generationCode
-                    ? `Código de generación: ${success.generationCode}`
-                    : `Orden: ${success.displayId ?? success.orderId ?? "—"}`}
-              </p>
-              {success.mhStatus && (
-                <p className="text-[11px] text-muted-foreground">
-                  Estado MH: {success.mhStatus}
-                </p>
-              )}
-              {typeof success.folio === "number" && (
-                <p className="font-mono text-xs text-muted-foreground">Folio: #{success.folio}</p>
-              )}
-              <p className="text-sm font-semibold">
-                Total cobrado: {formatScaledMoney(success.totalPaid)}
-              </p>
-              {success.changeDue > 0 && (
-                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                  Cambio: {formatScaledMoney(success.changeDue)}
-                </p>
-              )}
-            </div>
-            <Button variant="accent" className="mt-2 w-full max-w-xs" onClick={onClose}>
+
+            <ThermalReceiptPrint
+              width={receiptWidth}
+              onWidthChange={setReceiptWidth}
+              data={{
+                businessName: "MobiWare Retail",
+                tenantId: resolveTenantId(),
+                emissionPoint: EMISSION_POINT,
+                operatorName: operatorName || undefined,
+                documentType: success.documentType,
+                controlNumber: success.controlNumber,
+                generationCode: success.generationCode,
+                mhStatus: success.mhStatus,
+                customerName: success.customerName,
+                customerTaxId: success.customerTaxId,
+                paymentMethod: success.paymentLabel,
+                items: success.receiptItems,
+                subtotal: success.receiptItems.reduce((a, i) => a + i.lineTotal, 0),
+                total: success.receiptItems.reduce((a, i) => a + i.lineTotal, 0),
+                totalPaid: success.totalPaid,
+                changeDue: success.changeDue,
+                issuedAt: success.issuedAt,
+              }}
+            />
+
+            <Button variant="accent" className="w-full" onClick={onClose}>
               Nueva venta
             </Button>
           </div>

@@ -1,4 +1,4 @@
-import { Search, ShoppingBag, Store } from "lucide-react";
+import { Search, ShoppingBag, Store, Wallet } from "lucide-react";
 import {
   Badge,
   Button,
@@ -7,7 +7,7 @@ import {
   cn,
   type SatelliteTheme,
 } from "@retail/common";
-import { EMISSION_POINT, resolveTenantId, type Business } from "../../lib/api";
+import { EMISSION_POINT, resolveTenantId, type Business, type CashShift } from "../../lib/api";
 import { formatScaledMoney } from "../../lib/quantity";
 import { useAuthStore } from "../../store/auth";
 
@@ -34,6 +34,8 @@ interface PosHeaderProps {
   businesses?: Business[];
   activeBusinessId?: string;
   onBusinessChange?: (businessId: string) => void;
+  currentShift?: CashShift | null;
+  onOpenShift?: () => void;
   columns: PosColumnCount;
   onColumnsChange: (columns: PosColumnCount) => void;
   fontScale: PosFontScale;
@@ -53,6 +55,8 @@ export default function PosHeader({
   businesses = [],
   activeBusinessId = "",
   onBusinessChange = () => {},
+  currentShift = null,
+  onOpenShift = () => {},
   columns,
   onColumnsChange,
   fontScale,
@@ -62,6 +66,7 @@ export default function PosHeader({
 }: PosHeaderProps) {
   const operatorName = useAuthStore((state) => state.operatorName) || "Cajero";
   const logout = useAuthStore((state) => state.logout);
+  const shiftOpen = currentShift?.status === "OPEN";
 
   return (
     <SatelliteHeader
@@ -99,6 +104,18 @@ export default function PosHeader({
               {businesses[0]?.name}
             </Badge>
           ) : null}
+
+          <Button
+            variant={shiftOpen ? "outline" : "accent"}
+            size="xs"
+            onClick={onOpenShift}
+            className="h-7 gap-1.5"
+            aria-label={shiftOpen ? "Turno abierto" : "Abrir caja"}
+            title="Turno de caja"
+          >
+            <Wallet className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{shiftOpen ? "Turno Abierto" : "Abrir Caja"}</span>
+          </Button>
 
           <Button
             variant="outline"
