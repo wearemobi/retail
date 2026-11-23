@@ -5,8 +5,9 @@ import type { CartItem } from "../src/store/cart.store";
 import CheckoutDialog from "../src/components/pos/CheckoutDialog";
 
 vi.mock("../src/lib/api", () => ({
-  EMISSION_POINT: "POS-01",
+  EMISSION_POINT: "M001",
   WAREHOUSE_ID: "WH-MAIN",
+  getCurrentEmissionPoint: () => "M001",
   resolveTenantId: () => "tenant_demo",
   newOrderIdempotencyKey: () => "idem-test",
   isApiNetworkError: () => false,
@@ -66,7 +67,7 @@ describe("CheckoutDialog (SPEC-WRTL1)", () => {
     const body = vi.mocked(submitCheckout).mock.calls[0][0];
     expect(body).toMatchObject({
       warehouse_id: "WH-MAIN",
-      emission_point: "POS-01",
+      emission_point: "M001",
       payment_method: "01",
       document_type: "01",
       currency: "USD",

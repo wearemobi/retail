@@ -24,6 +24,7 @@ import CheckoutDialog from "./CheckoutDialog";
 import PendingOrdersDrawer from "./PendingOrdersDrawer";
 import ShiftDrawerDialog from "./ShiftDrawerDialog";
 import OfflineQueueDrawer from "./OfflineQueueDrawer";
+import DeviceSettingsDialog from "./DeviceSettingsDialog";
 import PosHeader, {
   scaleMultiplier,
   type PosColumnCount,
@@ -71,6 +72,8 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const [isOnline, setIsOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
   const [offlineQueue, setOfflineQueue] = useState<OfflineSaleRecord[]>([]);
   const [syncingOffline, setSyncingOffline] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [, setEmissionPointVersion] = useState(0);
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState("");
@@ -293,6 +296,7 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         onBusinessChange={setBusinessId}
         currentShift={currentShift}
         onOpenShift={() => setShiftOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
         isOnline={isOnline}
         offlineQueueCount={offlineQueue.length}
         onOpenOfflineQueue={() => setOfflineOpen(true)}
@@ -401,6 +405,13 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         syncing={syncingOffline}
         onClose={() => setOfflineOpen(false)}
         onSync={() => void handleSyncOffline()}
+      />
+
+      <DeviceSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        currentShift={currentShift}
+        onSaved={() => setEmissionPointVersion((v) => v + 1)}
       />
     </div>
   );

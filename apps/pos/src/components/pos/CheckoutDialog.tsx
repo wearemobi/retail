@@ -9,13 +9,13 @@ import {
 } from "lucide-react";
 import { Button, Input } from "@retail/common";
 import {
-  EMISSION_POINT,
   WAREHOUSE_ID,
+  getCurrentEmissionPoint,
+  isApiNetworkError,
   newOrderIdempotencyKey,
+  resolveTenantId,
   submitCheckout,
   submitOrderCheckout,
-  resolveTenantId,
-  isApiNetworkError,
   type CheckoutRequest,
   type Customer,
   type Order,
@@ -123,6 +123,7 @@ export default function CheckoutDialog({
   const [success, setSuccess] = useState<CheckoutSuccess | null>(null);
   const [receiptWidth, setReceiptWidth] = useState<ThermalPaperWidth>("80mm");
   const operatorName = useAuthStore((s) => s.operatorName);
+  const emissionPoint = getCurrentEmissionPoint();
 
   const openOrderId = activeOrder?.id;
 
@@ -253,7 +254,7 @@ export default function CheckoutDialog({
 
       const body: CheckoutRequest = {
         warehouse_id: WAREHOUSE_ID,
-        emission_point: EMISSION_POINT,
+        emission_point: emissionPoint,
         payment_method: paymentMethod,
         document_type: documentType,
         currency: "USD",
@@ -415,7 +416,7 @@ export default function CheckoutDialog({
               data={{
                 businessName: "MobiWare Retail",
                 tenantId: resolveTenantId(),
-                emissionPoint: EMISSION_POINT,
+                emissionPoint,
                 operatorName: operatorName || undefined,
                 documentType: success.documentType,
                 controlNumber: success.controlNumber,

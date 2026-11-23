@@ -7,7 +7,7 @@ import {
   cn,
   type SatelliteTheme,
 } from "@retail/common";
-import { EMISSION_POINT, resolveTenantId, type Business, type CashShift } from "../../lib/api";
+import { getCurrentEmissionPoint, resolveTenantId, type Business, type CashShift } from "../../lib/api";
 import { formatScaledMoney } from "../../lib/quantity";
 import { useAuthStore } from "../../store/auth";
 
@@ -36,6 +36,7 @@ interface PosHeaderProps {
   onBusinessChange?: (businessId: string) => void;
   currentShift?: CashShift | null;
   onOpenShift?: () => void;
+  onOpenSettings?: () => void;
   isOnline?: boolean;
   offlineQueueCount?: number;
   onOpenOfflineQueue?: () => void;
@@ -60,6 +61,7 @@ export default function PosHeader({
   onBusinessChange = () => {},
   currentShift = null,
   onOpenShift = () => {},
+  onOpenSettings = () => {},
   isOnline = true,
   offlineQueueCount = 0,
   onOpenOfflineQueue = () => {},
@@ -73,6 +75,7 @@ export default function PosHeader({
   const operatorName = useAuthStore((state) => state.operatorName) || "Cajero";
   const logout = useAuthStore((state) => state.logout);
   const shiftOpen = currentShift?.status === "OPEN";
+  const emissionPoint = getCurrentEmissionPoint();
 
   return (
     <SatelliteHeader
@@ -81,7 +84,7 @@ export default function PosHeader({
       tenantId={resolveTenantId()}
       icon={<Store className="h-4 w-4" aria-hidden="true" />}
       metrics={[
-        { label: "Caja", value: EMISSION_POINT },
+        { label: "Caja", value: emissionPoint },
         {
           label: "Carrito",
           value: cartCount,
@@ -126,6 +129,17 @@ export default function PosHeader({
                 {offlineQueueCount}
               </Badge>
             )}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={onOpenSettings}
+            className="h-7 gap-1.5"
+            aria-label="Configurar caja"
+            title="Configurar punto de emisión"
+          >
+            <span className="font-mono text-[11px]">{emissionPoint}</span>
           </Button>
 
           <Button

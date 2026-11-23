@@ -3,9 +3,9 @@ import { AlertCircle, Loader2, Wallet, X } from "lucide-react";
 import { Badge, Button, Input } from "@retail/common";
 import {
   closeShift,
-  EMISSION_POINT,
   fetchCurrentShift,
   fetchShiftReport,
+  getCurrentEmissionPoint,
   openShift,
   recordShiftMovement,
   resolveTenantId,
@@ -40,6 +40,7 @@ export default function ShiftDrawerDialog({ open, onClose, onShiftChange }: Shif
   const operatorId = useAuthStore((s) => s.operatorId);
   const operatorName = useAuthStore((s) => s.operatorName);
   const businessId = useAuthStore((s) => s.businessId);
+  const emissionPoint = getCurrentEmissionPoint();
   const [shift, setShift] = useState<CashShift | null>(null);
   const [report, setReport] = useState<CashShiftReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,7 +57,7 @@ export default function ShiftDrawerDialog({ open, onClose, onShiftChange }: Shif
     let cancelled = false;
     setLoading(true);
     setError("");
-    fetchCurrentShift(operatorId, EMISSION_POINT)
+    fetchCurrentShift(operatorId, emissionPoint)
       .then(async (current) => {
         if (cancelled) return;
         setShift(current);
@@ -83,7 +84,7 @@ export default function ShiftDrawerDialog({ open, onClose, onShiftChange }: Shif
 
   async function refresh(id: string) {
     const [current, rep] = await Promise.all([
-      fetchCurrentShift(operatorId, EMISSION_POINT),
+      fetchCurrentShift(operatorId, emissionPoint),
       fetchShiftReport(id),
     ]);
     setShift(current);
@@ -102,7 +103,7 @@ export default function ShiftDrawerDialog({ open, onClose, onShiftChange }: Shif
     try {
       const created = await openShift({
         business_id: businessId || undefined,
-        emission_point: EMISSION_POINT,
+        emission_point: emissionPoint,
         operator_id: operatorId,
         operator_name: operatorName || operatorId,
         opening_cash: scaled,
@@ -205,7 +206,7 @@ export default function ShiftDrawerDialog({ open, onClose, onShiftChange }: Shif
           {!loading && !active && !closed && (
             <div className="flex flex-col gap-3 rounded-xl border border-border p-4">
               <h3 className="text-sm font-semibold">Apertura de Turno</h3>
-              <p className="text-xs text-muted-foreground">Tenant {resolveTenantId()} · Punto {EMISSION_POINT} · Operador {operatorName || operatorId}</p>
+              <p className="text-xs text-muted-foreground">Tenant {resolveTenantId()} · Punto {emissionPoint} · Operador {operatorName || operatorId}</p>
               <label className="flex flex-col gap-1 text-xs font-medium">
                 Fondo inicial (USD)
                 <Input inputMode="decimal" value={openingCash} onChange={(e) => setOpeningCash(e.target.value)} />
