@@ -26,9 +26,6 @@ import { getEmissionPoint as getStoredEmissionPoint } from "./emissionPoint";
 export const TENANT_STORAGE_KEY = "ware-pos.tenant";
 export const WAREHOUSE_ID = "WH-MAIN";
 
-/** @deprecated Use getEmissionPoint(tenantId) or getCurrentEmissionPoint(). */
-export const EMISSION_POINT = "M001";
-
 export function getCurrentEmissionPoint(): string {
   return getStoredEmissionPoint(resolveTenantId());
 }
@@ -380,9 +377,18 @@ async function shiftFetch<T>(path: string, init: RequestInit = {}, fallback: str
     useAuthStore.getState().logout();
   }
   const text = await response.text();
-  const data = text ? (JSON.parse(text) as unknown) : null;
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
   if (!response.ok) {
-    throw new Error(parseApiError(data, fallback));
+    const err = new Error(parseApiError(data, fallback)) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
   }
   return data as T;
 }
@@ -392,16 +398,12 @@ export async function fetchCurrentShift(
   emissionPoint = getCurrentEmissionPoint(),
 ): Promise<CashShift | null> {
   const qs = new URLSearchParams({ operator_id: operatorId, emission_point: emissionPoint });
-  const token = useAuthStore.getState().token;
-  const headers = new Headers({ "X-Tenant-Id": resolveTenantId() });
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${API_BASE_URL}/v1/shifts/current?${qs.toString()}`, { headers });
-  if (response.status === 404) return null;
-  if (response.status === 401) useAuthStore.getState().logout();
-  const text = await response.text();
-  const data = text ? (JSON.parse(text) as unknown) : null;
-  if (!response.ok) throw new Error(parseApiError(data, "No se pudo consultar el turno actual."));
-  return data as CashShift;
+  try {
+    return await shiftFetch<CashShift>(`/v1/shifts/current?${qs.toString()}`, {}, "No se pudo consultar el turno actual.");
+  } catch (err) {
+    if ((err as { status?: number })?.status === 404) return null;
+    throw err;
+  }
 }
 
 export async function openShift(input: {

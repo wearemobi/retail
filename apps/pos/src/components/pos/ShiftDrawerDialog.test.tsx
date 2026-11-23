@@ -12,7 +12,6 @@ const shiftApi = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/api", () => ({
-  EMISSION_POINT: "M001",
   getCurrentEmissionPoint: () => "M001",
   resolveTenantId: () => "t1",
   fetchCurrentShift: shiftApi.fetchCurrentShift,
