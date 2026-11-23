@@ -172,6 +172,7 @@ export default function CheckoutDialog({
       if (orderMode && activeOrder?.id) {
         const payload: OrderCheckoutRequest = {
           document_type: documentType,
+          emission_point: emissionPoint,
           payments: [
             {
               payment_method: orderPaymentMethod(paymentMethod),
