@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/api")>();
+  return { ...actual, getCurrentEmissionPoint: () => "M001", resolveTenantId: () => "tenant_demo" };
+});
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import PosHeader from "../src/components/pos/PosHeader";
 import { useAuthStore } from "../src/store/auth";
@@ -27,7 +32,7 @@ describe("PosHeader (SPEC-WRTL1)", () => {
       />,
     );
 
-    expect(screen.getByText("POS-01")).toBeInTheDocument();
+    expect(screen.getAllByText("M001").length).toBeGreaterThan(0);
     const cartMetric = screen.getByText("Carrito:").parentElement;
     expect(cartMetric).toHaveTextContent("Carrito:2");
     expect(screen.getByText("Cajero Uno")).toBeInTheDocument();

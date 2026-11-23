@@ -17,7 +17,7 @@ import {
 import { useAuthStore, storedBusinessId } from "../../store/auth";
 import {
   createPresaleOrder,
-  EMISSION_POINT,
+  getCurrentEmissionPoint,
   newOrderIdempotencyKey,
   resolveTenantId,
   WAREHOUSE_ID,
@@ -57,7 +57,7 @@ export default function CartPanel({
         source_channel: "POS",
         app_id: "ware-retail",
         currency_code: "USD",
-        emission_point: EMISSION_POINT,
+        emission_point: getCurrentEmissionPoint(),
         warehouse_id: WAREHOUSE_ID,
         items: items.map((item) => ({
           sku: item.sku,

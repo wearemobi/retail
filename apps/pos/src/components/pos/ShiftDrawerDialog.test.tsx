@@ -12,7 +12,8 @@ const shiftApi = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/api", () => ({
-  EMISSION_POINT: "POS-01",
+  EMISSION_POINT: "M001",
+  getCurrentEmissionPoint: () => "M001",
   resolveTenantId: () => "t1",
   fetchCurrentShift: shiftApi.fetchCurrentShift,
   fetchShiftReport: shiftApi.fetchShiftReport,
@@ -62,7 +63,7 @@ describe("ShiftDrawerDialog (SPEC-WRTL4)", () => {
     expect(shiftApi.openShift.mock.calls[0][0]).toMatchObject({
       operator_id: "op1",
       opening_cash: 150000,
-      emission_point: "POS-01",
+      emission_point: "M001",
     });
   });
 

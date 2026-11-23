@@ -21,9 +21,17 @@ import {
   type OfflineSaleRecord,
 } from "./offlineStore";
 
+import { getEmissionPoint as getStoredEmissionPoint } from "./emissionPoint";
+
 export const TENANT_STORAGE_KEY = "ware-pos.tenant";
 export const WAREHOUSE_ID = "WH-MAIN";
-export const EMISSION_POINT = "POS-01";
+
+/** @deprecated Use getEmissionPoint(tenantId) or getCurrentEmissionPoint(). */
+export const EMISSION_POINT = "M001";
+
+export function getCurrentEmissionPoint(): string {
+  return getStoredEmissionPoint(resolveTenantId());
+}
 
 export function resolveTenantId(): string {
   return commonResolveTenantId(TENANT_STORAGE_KEY);
@@ -381,7 +389,7 @@ async function shiftFetch<T>(path: string, init: RequestInit = {}, fallback: str
 
 export async function fetchCurrentShift(
   operatorId: string,
-  emissionPoint = EMISSION_POINT,
+  emissionPoint = getCurrentEmissionPoint(),
 ): Promise<CashShift | null> {
   const qs = new URLSearchParams({ operator_id: operatorId, emission_point: emissionPoint });
   const token = useAuthStore.getState().token;
