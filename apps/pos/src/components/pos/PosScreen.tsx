@@ -73,7 +73,7 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const [offlineQueue, setOfflineQueue] = useState<OfflineSaleRecord[]>([]);
   const [syncingOffline, setSyncingOffline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [, setEmissionPointVersion] = useState(0);
+  const [emissionPointVersion, setEmissionPointVersion] = useState(0);
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState("");
@@ -101,20 +101,23 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
     setOfflineQueue(listOfflineSales(resolveTenantId()));
   };
 
-  // Load current cash shift for operator (SPEC-WRTL4).
+  // Load current cash shift for operator (SPEC-WRTL4); refresh on emission point change.
   useEffect(() => {
     let cancelled = false;
-    import("../../lib/api").then(({ fetchCurrentShift }) => {
+    import("../../lib/api").then(({ fetchCurrentShift, getCurrentEmissionPoint }) => {
       const opId = useAuthStore.getState().operatorId;
       if (!opId) return;
-      fetchCurrentShift(opId).then((shift) => { if (!cancelled) setCurrentShift(shift); }).catch(() => {});
+      fetchCurrentShift(opId, getCurrentEmissionPoint()).then((shift) => { if (!cancelled) setCurrentShift(shift); }).catch(() => {});
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [emissionPointVersion]);
 
   // SPEC-WRTL5: offline queue + connectivity sync.
   useEffect(() => {
     refreshOfflineQueue();
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      void syncOfflineSalesQueue().then(() => refreshOfflineQueue());
+    }
     const onOnline = () => {
       setIsOnline(true);
       void syncOfflineSalesQueue().then(() => refreshOfflineQueue());

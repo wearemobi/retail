@@ -475,10 +475,11 @@ export async function syncOfflineSalesQueue(
   const errors: string[] = [];
   for (const record of records) {
     try {
+      const occurredAt = record.createdAt ?? new Date().toISOString();
       if (record.kind === "POS_CHECKOUT") {
-        await submitCheckout(record.payload as CheckoutRequest, record.idempotencyKey);
+        await submitCheckout({ ...(record.payload as any), occurred_at: occurredAt } as CheckoutRequest, record.idempotencyKey);
       } else if (record.kind === "ORDER_CHECKOUT" && record.orderId) {
-        await submitOrderCheckout(record.orderId, record.payload as OrderCheckoutRequest, record.idempotencyKey);
+        await submitOrderCheckout(record.orderId, { ...(record.payload as any), occurred_at: occurredAt } as OrderCheckoutRequest, record.idempotencyKey);
       } else {
         throw new Error("Registro offline inválido.");
       }
