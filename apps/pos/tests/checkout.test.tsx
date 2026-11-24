@@ -5,7 +5,6 @@ import type { CartItem } from "../src/store/cart.store";
 import CheckoutDialog from "../src/components/pos/CheckoutDialog";
 
 vi.mock("../src/lib/api", () => ({
-  EMISSION_POINT: "M001",
   WAREHOUSE_ID: "WH-MAIN",
   getCurrentEmissionPoint: () => "M001",
   resolveTenantId: () => "tenant_demo",

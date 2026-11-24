@@ -30,6 +30,7 @@ import {
   formatScaledMoney,
   fromScaled,
   parseMoneyInput,
+  toScaled,
 } from "../../lib/quantity";
 import type { CartItem } from "../../store/cart.store";
 import { useAuthStore } from "../../store/auth";
@@ -93,13 +94,6 @@ function orderPaymentMethod(
   if (method === "02") return "CREDIT_CARD";
   if (method === "03") return "TRANSFER";
   return "CASH";
-}
-
-function toScaledNumber(value: string | number): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return 0;
-  // Order checkout totals are decimal strings (e.g. "45.2000") in API.
-  return Math.round(n * 10000);
 }
 
 export default function CheckoutDialog({
@@ -206,8 +200,8 @@ export default function CheckoutDialog({
             folio: response.folio_number,
             generationCode: response.fiscal_document?.generation_code,
             mhStatus: response.fiscal_document?.mh_status,
-            totalPaid: response.total_paid ? toScaledNumber(response.total_paid) : activeTotal,
-            changeDue: response.change_amount ? toScaledNumber(response.change_amount) : changeOnSuccess,
+            totalPaid: response.total_paid ? toScaled(Number(response.total_paid)) : activeTotal,
+            changeDue: response.change_amount ? toScaled(Number(response.change_amount)) : changeOnSuccess,
             receiptItems,
             documentType,
             customerName: customer?.legal_name,
