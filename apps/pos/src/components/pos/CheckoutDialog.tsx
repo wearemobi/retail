@@ -162,6 +162,51 @@ export default function CheckoutDialog({
     const paymentLabel = PAYMENT_METHODS.find((m) => m.code === paymentMethod)?.label ?? paymentMethod;
     const tenantId = resolveTenantId();
 
+    function handleContingency(params: {
+      kind: "ORDER_CHECKOUT" | "POS_CHECKOUT";
+      orderId?: string;
+      displayId?: string | null;
+      payload: CheckoutRequest | OrderCheckoutRequest;
+      total: number;
+      receiptItems: CheckoutSuccess["receiptItems"];
+      customerName?: string;
+      customerTaxId?: string;
+      totalPaidFallback: number;
+      changeDue: number;
+    }) {
+      enqueueOfflineSale(tenantId, {
+        idempotencyKey,
+        tenantId,
+        kind: params.kind,
+        orderId: params.orderId,
+        payload: params.payload,
+        total: params.total,
+        customerName: params.customerName,
+        customerTaxId: params.customerTaxId,
+        documentType,
+        paymentLabel,
+        receiptItems: params.receiptItems,
+        createdAt: new Date().toISOString(),
+        status: "PENDING",
+      });
+      setSuccess({
+        ...(params.kind === "ORDER_CHECKOUT"
+          ? { orderId: params.orderId, displayId: params.displayId ?? undefined }
+          : {}),
+        totalPaid: params.totalPaidFallback,
+        changeDue: params.changeDue,
+        receiptItems: params.receiptItems,
+        documentType,
+        customerName: params.customerName,
+        customerTaxId: params.customerTaxId,
+        paymentLabel,
+        issuedAt: new Date().toISOString(),
+        contingency: true,
+        idempotencyKey,
+      });
+      onCompleted();
+    }
+
     try {
       if (orderMode && activeOrder?.id) {
         const payload: OrderCheckoutRequest = {
@@ -213,36 +258,18 @@ export default function CheckoutDialog({
           return;
         } catch (err) {
           if (!isApiNetworkError(err)) throw err;
-          enqueueOfflineSale(tenantId, {
-            idempotencyKey,
-            tenantId,
+          handleContingency({
             kind: "ORDER_CHECKOUT",
             orderId: activeOrder.id,
+            displayId: activeOrder.display_id,
             payload,
             total: activeTotal,
+            receiptItems,
             customerName: customer?.legal_name ?? activeOrder.customer_name,
             customerTaxId: customer?.tax_id,
-            documentType,
-            paymentLabel,
-            receiptItems,
-            createdAt: new Date().toISOString(),
-            status: "PENDING",
-          });
-          setSuccess({
-            orderId: activeOrder.id,
-            displayId: activeOrder.display_id,
-            totalPaid: isCash && tenderedScaled !== null ? tenderedScaled : activeTotal,
+            totalPaidFallback: isCash && tenderedScaled !== null ? tenderedScaled : activeTotal,
             changeDue: changeOnSuccess,
-            receiptItems,
-            documentType,
-            customerName: customer?.legal_name ?? activeOrder.customer_name,
-            customerTaxId: customer?.tax_id,
-            paymentLabel,
-            issuedAt: new Date().toISOString(),
-            contingency: true,
-            idempotencyKey,
           });
-          onCompleted();
           return;
         }
       }
@@ -294,33 +321,16 @@ export default function CheckoutDialog({
         onCompleted();
       } catch (err) {
         if (!isApiNetworkError(err)) throw err;
-        enqueueOfflineSale(tenantId, {
-          idempotencyKey,
-          tenantId,
+        handleContingency({
           kind: "POS_CHECKOUT",
           payload: body,
           total,
+          receiptItems,
           customerName: customer?.legal_name,
           customerTaxId: customer?.tax_id,
-          documentType,
-          paymentLabel,
-          receiptItems,
-          createdAt: new Date().toISOString(),
-          status: "PENDING",
-        });
-        setSuccess({
-          totalPaid: isCash && tenderedScaled !== null ? tenderedScaled : total,
+          totalPaidFallback: isCash && tenderedScaled !== null ? tenderedScaled : total,
           changeDue: changeOnSuccess,
-          receiptItems,
-          documentType,
-          customerName: customer?.legal_name,
-          customerTaxId: customer?.tax_id,
-          paymentLabel,
-          issuedAt: new Date().toISOString(),
-          contingency: true,
-          idempotencyKey,
         });
-        onCompleted();
       }
     } catch (err) {
       setError(
