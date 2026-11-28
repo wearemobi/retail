@@ -25,6 +25,7 @@ import {
 import { enqueueOfflineSale } from "../../lib/offlineStore";
 import {
   cartLineTotal,
+  cartTaxTotal,
 } from "../../store/cart.store";
 import {
   formatScaledMoney,
@@ -58,6 +59,7 @@ interface CheckoutSuccess {
   totalPaid: number;
   changeDue: number;
   receiptItems: { description: string; quantity: number; unitPrice: number; lineTotal: number }[];
+  taxAmount?: number;
   documentType: DocumentType;
   customerName?: string;
   customerTaxId?: string;
@@ -169,6 +171,7 @@ export default function CheckoutDialog({
       payload: CheckoutRequest | OrderCheckoutRequest;
       total: number;
       receiptItems: CheckoutSuccess["receiptItems"];
+      taxAmount?: number;
       customerName?: string;
       customerTaxId?: string;
       totalPaidFallback: number;
@@ -196,6 +199,7 @@ export default function CheckoutDialog({
         totalPaid: params.totalPaidFallback,
         changeDue: params.changeDue,
         receiptItems: params.receiptItems,
+        taxAmount: params.taxAmount,
         documentType,
         customerName: params.customerName,
         customerTaxId: params.customerTaxId,
@@ -312,6 +316,7 @@ export default function CheckoutDialog({
           totalPaid: response.total_paid ?? total,
           changeDue: changeOnSuccess,
           receiptItems,
+          taxAmount: cartTaxTotal(items),
           documentType,
           customerName: customer?.legal_name,
           customerTaxId: customer?.tax_id,
@@ -326,6 +331,7 @@ export default function CheckoutDialog({
           payload: body,
           total,
           receiptItems,
+          taxAmount: cartTaxTotal(items),
           customerName: customer?.legal_name,
           customerTaxId: customer?.tax_id,
           totalPaidFallback: isCash && tenderedScaled !== null ? tenderedScaled : total,
@@ -432,7 +438,10 @@ export default function CheckoutDialog({
                 paymentMethod: success.paymentLabel,
                 items: success.receiptItems,
                 subtotal: success.receiptItems.reduce((a, i) => a + i.lineTotal, 0),
-                total: success.receiptItems.reduce((a, i) => a + i.lineTotal, 0),
+                taxAmount: success.taxAmount ?? 0,
+                total:
+                  success.receiptItems.reduce((a, i) => a + i.lineTotal, 0) +
+                  (success.taxAmount ?? 0),
                 totalPaid: success.totalPaid,
                 changeDue: success.changeDue,
                 issuedAt: success.issuedAt,

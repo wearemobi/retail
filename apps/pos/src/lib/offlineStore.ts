@@ -62,16 +62,34 @@ export function cacheCatalog(tenantId: string, products: Product[]): void {
   writeJson(catalogKey(tenantId), { updatedAt: new Date().toISOString(), products });
 }
 
-export function getCachedCatalog(tenantId: string, search = ""): Product[] {
+export interface CatalogCacheFilters {
+  categoryId?: string;
+  onlyFavorites?: boolean;
+}
+
+export function getCachedCatalog(
+  tenantId: string,
+  search = "",
+  filters: CatalogCacheFilters = {},
+): Product[] {
   if (!tenantId) return [];
   const data = readJson<{ products?: Product[] }>(catalogKey(tenantId), {});
   const term = search.trim().toLowerCase();
-  const items = (data.products ?? []).filter((p) => p.is_active !== false);
+  let items = (data.products ?? []).filter(
+    (p) => p.is_active !== false && p.status !== "INACTIVE",
+  );
+  if (filters.categoryId) {
+    items = items.filter((p) => p.category_id === filters.categoryId);
+  }
+  if (filters.onlyFavorites) {
+    items = items.filter((p) => p.is_favorite === true);
+  }
   if (!term) return items;
   return items.filter((p) => {
     const name = (p.name ?? "").toLowerCase();
     const sku = (p.sku ?? "").toLowerCase();
-    return name.includes(term) || sku.includes(term);
+    const barcode = (p.primary_barcode ?? "").toLowerCase();
+    return name.includes(term) || sku.includes(term) || barcode.includes(term);
   });
 }
 

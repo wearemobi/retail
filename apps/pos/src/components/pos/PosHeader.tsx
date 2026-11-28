@@ -224,7 +224,7 @@ export default function PosHeader({
             onClick={() => onSearchSubmit(search)}
             className="h-7"
             aria-label="Buscar por SKU"
-            title="Buscar por SKU"
+            title="Buscar por SKU o código de barras"
           >
             <Search className="h-3.5 w-3.5" aria-hidden="true" />
             <span>SKU</span>
@@ -250,8 +250,8 @@ export default function PosHeader({
                 onSearchSubmit(search);
               }
             }}
-            placeholder="Buscar producto o escanear SKU…"
-            aria-label="Buscar producto o escanear SKU"
+            placeholder="Buscar producto o escanear código…"
+            aria-label="Buscar producto o escanear código"
             className="pl-9 focus-visible:ring-accent-brand"
           />
         </div>

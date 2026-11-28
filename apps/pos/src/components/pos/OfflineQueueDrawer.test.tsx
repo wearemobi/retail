@@ -20,6 +20,7 @@ vi.mock("@retail/common", async (importOriginal) => {
 });
 
 vi.mock("../../store/auth", () => ({
+  storedBusinessId: () => "",
   useAuthStore: {
     getState: () => ({ token: "tok", logout: vi.fn() }),
   },

@@ -9,8 +9,10 @@ import {
   unitLabel,
 } from "../../lib/quantity";
 import {
+  cartGrandTotal,
   cartLineTotal,
   cartSubtotal,
+  cartTaxTotal,
   useCartStore,
   type CartItem,
 } from "../../store/cart.store";
@@ -40,6 +42,8 @@ export default function CartPanel({
   const setQuantity = useCartStore((state) => state.setQuantity);
   const removeItem = useCartStore((state) => state.removeItem);
   const subtotal = cartSubtotal(items);
+  const tax = cartTaxTotal(items);
+  const total = cartGrandTotal(items);
   const clear = useCartStore((state) => state.clear);
 
   async function handlePresale() {
@@ -168,10 +172,18 @@ export default function CartPanel({
       </div>
 
       <div className="border-t border-border p-3">
+        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+          <span>Subtotal</span>
+          <span>{formatScaledMoney(subtotal)}</span>
+        </div>
+        <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+          <span>IVA 13%</span>
+          <span>{formatScaledMoney(tax)}</span>
+        </div>
         <div className="mb-2 flex items-center justify-between">
           <span className="text-sm text-muted-foreground">Total</span>
           <span className="text-xl font-bold text-accent-brand">
-            {formatScaledMoney(subtotal)}
+            {formatScaledMoney(total)}
           </span>
         </div>
         {presaleError && (

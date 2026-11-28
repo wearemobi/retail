@@ -8,7 +8,7 @@ import {
   type PinLoginResponse,
   type paths,
 } from "@retail/common";
-import { useAuthStore } from "../store/auth";
+import { storedBusinessId, useAuthStore } from "../store/auth";
 import {
   cacheCatalog,
   cacheCustomers,
@@ -50,7 +50,36 @@ export type { Cashier, PinLoginResponse };
 export type InventoryResponse =
   paths["/v1/inventory/products"]["get"]["responses"]["200"]["content"]["application/json"];
 
-export type Product = NonNullable<InventoryResponse["items"]>[number];
+export type TaxType = "TAXABLE" | "EXEMPT" | "NON_SUBJECT";
+export type RetailStorageType = "AMBIENT" | "REFRIGERATED" | "FROZEN";
+
+export interface Product {
+  id?: string;
+  sku?: string;
+  name?: string;
+  description?: string;
+  category_id?: string | null;
+  category_name?: string | null;
+  image_file_id?: string | null;
+  storage_type?: RetailStorageType;
+  is_perishable?: boolean;
+  shelf_life_days?: number | null;
+  is_favorite?: boolean;
+  base_price?: number;
+  effective_price?: number | null;
+  effective_price_usd?: number | null;
+  stock_quantity?: number | null;
+  stock?: number | null;
+  is_active?: boolean;
+  is_weighable?: boolean;
+  unit_of_measure?: string;
+  tax_type?: TaxType | string;
+  primary_barcode?: string | null;
+  status?: "ACTIVE" | "INACTIVE";
+  track_inventory?: boolean;
+  product_type?: string;
+  sort_order?: number;
+}
 
 export type Customer = NonNullable<
   paths["/v1/customers"]["get"]["responses"]["200"]["content"]["application/json"]["items"]
@@ -153,19 +182,119 @@ export async function loginWithPin(username: string, pin: string): Promise<PinLo
   return commonLoginWithPin(api, resolveTenantId(), username, pin);
 }
 
-export async function fetchProducts(search = ""): Promise<Product[]> {
+type LooseGetClient = {
+  GET: (
+    url: string,
+    options: {
+      params: {
+        header: { "X-Tenant-Id": string };
+        query: Record<string, string | number | boolean | undefined>;
+      };
+    },
+  ) => Promise<{ data?: unknown; error?: unknown }>;
+};
+
+export interface FetchProductsOptions {
+  categoryId?: string;
+  onlyFavorites?: boolean;
+  businessId?: string;
+}
+
+export interface BarcodeLookup {
+  product: Product;
+  barcode: {
+    id?: string;
+    code: string;
+    barcode_type?: string;
+    label?: string;
+    pack_quantity?: number;
+    pack_quantity_units?: number;
+    is_primary?: boolean;
+  };
+}
+
+const looseGetApi = api as unknown as LooseGetClient;
+const vaultImageCache = new Map<string, string>();
+
+function normalizeProducts(data: unknown): Product[] {
+  if (Array.isArray(data)) return data as Product[];
+  if (data && typeof data === "object") {
+    const record = data as { items?: unknown; products?: unknown };
+    if (Array.isArray(record.items)) return record.items as Product[];
+    if (Array.isArray(record.products)) return record.products as Product[];
+  }
+  return [];
+}
+
+function productCacheKey(product: Product): string {
+  return product.sku || product.id || product.name || "";
+}
+
+function warmCatalogCache(tenantId: string, products: Product[]): void {
+  if (products.length === 0) return;
+  const map = new Map(getCachedCatalog(tenantId).map((product) => [productCacheKey(product), product]));
+  for (const product of products) {
+    const key = productCacheKey(product);
+    if (key) map.set(key, product);
+  }
+  cacheCatalog(tenantId, Array.from(map.values()));
+}
+
+export function normalizeTaxType(value: unknown): TaxType {
+  return value === "EXEMPT" || value === "NON_SUBJECT" ? value : "TAXABLE";
+}
+
+export function productUnitPrice(product: Product): number {
+  return product.effective_price ?? product.base_price ?? 0;
+}
+
+function isNotFound(error: unknown): boolean {
+  if (!error) return false;
+  if (typeof error === "object") {
+    const status = (error as { status?: unknown; statusCode?: unknown }).status ??
+      (error as { statusCode?: unknown }).statusCode;
+    if (status === 404 || status === "404") return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b404\b/.test(message);
+}
+
+export async function fetchVaultDownloadUrl(fileId: string): Promise<string> {
+  const cached = vaultImageCache.get(fileId);
+  if (cached) return cached;
+  const { data, error } = await looseGetApi.GET(`/v1/vault/files/${encodeURIComponent(fileId)}`, {
+    params: { header: { "X-Tenant-Id": resolveTenantId() }, query: {} },
+  });
+  const downloadUrl =
+    data && typeof data === "object" ? (data as { download_url?: unknown }).download_url : undefined;
+  if (error || typeof downloadUrl !== "string" || !downloadUrl) {
+    throw new Error(parseApiError(error, "No fue posible cargar la foto del producto."));
+  }
+  vaultImageCache.set(fileId, downloadUrl);
+  return downloadUrl;
+}
+
+export async function fetchProducts(
+  search = "",
+  options: FetchProductsOptions = {},
+): Promise<Product[]> {
   const term = search.trim();
   const tenantId = resolveTenantId();
+  const cacheFilters = { categoryId: options.categoryId, onlyFavorites: options.onlyFavorites };
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return getCachedCatalog(tenantId, term);
+    return getCachedCatalog(tenantId, term, cacheFilters);
   }
   try {
-    const { data, error } = await api.GET("/v1/inventory/products", {
+    const businessId =
+      options.businessId || useAuthStore.getState().businessId || storedBusinessId(tenantId);
+    const { data, error } = await looseGetApi.GET("/v1/retail/products", {
       params: {
         header: { "X-Tenant-Id": tenantId },
         query: {
           warehouse_id: WAREHOUSE_ID,
-          vertical: "RETAIL",
+          business_id: businessId || undefined,
+          category_id: options.categoryId || undefined,
+          is_favorite: options.onlyFavorites ? true : undefined,
           size: 200,
           sort: "name,asc",
           ...(term ? { search: term } : {}),
@@ -175,19 +304,15 @@ export async function fetchProducts(search = ""): Promise<Product[]> {
     if (error || !data) {
       throw new Error(parseApiError(error, "No fue posible cargar el catálogo de productos."));
     }
-    const items = (data.items ?? []).filter((product) => product.is_active !== false);
-    // Cache the unfiltered full fetch; search fetches also warm cache opportunistically.
-    if (!term) cacheCatalog(tenantId, items);
-    else if (items.length > 0) {
-      const existing = getCachedCatalog(tenantId, "");
-      const map = new Map(existing.map((p) => [p.sku ?? "", p]));
-      for (const p of items) map.set(p.sku ?? "", p);
-      cacheCatalog(tenantId, Array.from(map.values()));
-    }
+    const items = normalizeProducts(data).filter(
+      (product) => product.is_active !== false && product.status !== "INACTIVE",
+    );
+    if (!term && !options.categoryId && !options.onlyFavorites) cacheCatalog(tenantId, items);
+    else warmCatalogCache(tenantId, items);
     return items;
   } catch (err) {
     if (isNetworkError(err)) {
-      return getCachedCatalog(tenantId, term);
+      return getCachedCatalog(tenantId, term, cacheFilters);
     }
     throw err;
   }
@@ -202,7 +327,53 @@ export async function fetchProductBySku(sku: string): Promise<Product | null> {
     },
   });
   if (error || !data) return null;
-  return data;
+  return data as Product;
+}
+
+export async function resolveProductByBarcode(code: string): Promise<BarcodeLookup | null> {
+  const value = code.trim();
+  if (!value) return null;
+  let response: { data?: unknown; error?: unknown };
+  try {
+    response = await looseGetApi.GET(
+      `/v1/inventory/products/by-barcode/${encodeURIComponent(value)}`,
+      {
+        params: {
+          header: { "X-Tenant-Id": resolveTenantId() },
+          query: { warehouse_id: WAREHOUSE_ID },
+        },
+      },
+    );
+  } catch (err) {
+    if (isNotFound(err)) return null;
+    throw new Error(parseApiError(err, "No fue posible resolver el código de barras."));
+  }
+  if (response.error) {
+    if (isNotFound(response.error)) return null;
+    throw new Error(
+      parseApiError(response.error, "No fue posible resolver el código de barras."),
+    );
+  }
+  const payload = response.data as { product?: unknown; barcode?: unknown } | undefined;
+  if (!payload || !payload.product || typeof payload.product !== "object") return null;
+  const rawBarcode =
+    payload.barcode && typeof payload.barcode === "object"
+      ? (payload.barcode as Record<string, unknown>)
+      : {};
+  return {
+    product: payload.product as Product,
+    barcode: {
+      id: typeof rawBarcode.id === "string" ? rawBarcode.id : undefined,
+      code: typeof rawBarcode.code === "string" ? rawBarcode.code : value,
+      barcode_type:
+        typeof rawBarcode.barcode_type === "string" ? rawBarcode.barcode_type : undefined,
+      label: typeof rawBarcode.label === "string" ? rawBarcode.label : undefined,
+      pack_quantity: typeof rawBarcode.pack_quantity === "number" ? rawBarcode.pack_quantity : undefined,
+      pack_quantity_units:
+        typeof rawBarcode.pack_quantity_units === "number" ? rawBarcode.pack_quantity_units : undefined,
+      is_primary: typeof rawBarcode.is_primary === "boolean" ? rawBarcode.is_primary : undefined,
+    },
+  };
 }
 
 export async function fetchCustomers(search: string): Promise<Customer[]> {

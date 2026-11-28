@@ -84,7 +84,7 @@ describe("PosHeader (SPEC-WRTL1)", () => {
       />,
     );
 
-    fireEvent.keyDown(screen.getByLabelText("Buscar producto o escanear SKU"), {
+    fireEvent.keyDown(screen.getByLabelText("Buscar producto o escanear código"), {
       key: "Enter",
     });
     expect(onSearchSubmit).toHaveBeenCalledWith("SKU-01");
