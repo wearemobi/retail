@@ -1,16 +1,15 @@
 import { create } from "zustand";
 import { QUANTITY_SCALE, isWeightedUnit, toScaled } from "../lib/quantity";
-import type { Product } from "../lib/api";
+import { normalizeTaxType, productUnitPrice, type Product, type TaxType } from "../lib/api";
 
 export interface CartItem {
   sku: string;
   name: string;
-  /** Unit price in the 10^-4 scale. */
   unitPrice: number;
-  /** Quantity in the 10^-4 scale (10000 = 1.0000). */
   quantity: number;
   unitOfMeasure?: string;
   isWeighted: boolean;
+  taxType: TaxType;
 }
 
 interface CartState {
@@ -31,6 +30,18 @@ export function cartSubtotal(items: CartItem[]): number {
   return items.reduce((total, item) => total + cartLineTotal(item), 0);
 }
 
+export function cartTaxTotal(items: CartItem[]): number {
+  return items.reduce(
+    (total, item) =>
+      item.taxType === "TAXABLE" ? total + Math.round((cartLineTotal(item) * 13) / 100) : total,
+    0,
+  );
+}
+
+export function cartGrandTotal(items: CartItem[]): number {
+  return cartSubtotal(items) + cartTaxTotal(items);
+}
+
 export function cartStep(item: CartItem): number {
   return item.isWeighted ? toScaled(0.25) : QUANTITY_SCALE;
 }
@@ -49,7 +60,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (existing) {
         return {
           items: state.items.map((item) =>
-            item.sku === sku ? { ...item, quantity: item.quantity + incoming } : item,
+            item.sku === sku
+              ? { ...item, quantity: item.quantity + incoming, taxType: normalizeTaxType(product.tax_type) }
+              : item,
           ),
         };
       }
@@ -59,11 +72,11 @@ export const useCartStore = create<CartState>((set, get) => ({
           {
             sku,
             name: product.name ?? "Producto",
-            unitPrice: product.base_price ?? 0,
+            unitPrice: productUnitPrice(product),
             quantity: incoming,
             unitOfMeasure: product.unit_of_measure,
-            // The product master is the source of truth; CAT-014 is only a fallback.
             isWeighted: product.is_weighable ?? isWeightedUnit(product.unit_of_measure),
+            taxType: normalizeTaxType(product.tax_type),
           },
         ],
       };

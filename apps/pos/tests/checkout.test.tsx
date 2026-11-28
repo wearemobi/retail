@@ -25,6 +25,7 @@ const items: CartItem[] = [
     quantity: 20000,
     unitOfMeasure: "36",
     isWeighted: true,
+    taxType: "TAXABLE",
   },
 ];
 

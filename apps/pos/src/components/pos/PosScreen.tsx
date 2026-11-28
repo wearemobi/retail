@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, ShoppingCart } from "lucide-react";
+import { AlertCircle, ShoppingCart, Star } from "lucide-react";
 import { Button, playAdd, type SatelliteTheme } from "@retail/common";
 import {
   fetchBusinesses,
   fetchPendingRetailOrders,
   fetchProductBySku,
   fetchProducts,
+  resolveProductByBarcode,
   resolveTenantId,
   syncOfflineSalesQueue,
+  type BarcodeLookup,
   type Business,
   type OfflineSaleRecord,
   type Order,
@@ -16,7 +18,12 @@ import {
 } from "../../lib/api";
 import { listOfflineSales } from "../../lib/offlineStore";
 import { storedBusinessId, useAuthStore } from "../../store/auth";
-import { cartSubtotal, useCartStore } from "../../store/cart.store";
+import { cartGrandTotal, useCartStore } from "../../store/cart.store";
+import {
+  QUANTITY_SCALE,
+  formatScaledQuantity,
+  toScaled,
+} from "../../lib/quantity";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import CatalogGrid from "./CatalogGrid";
 import CartPanel from "./CartPanel";
@@ -52,6 +59,32 @@ function readScale(): PosFontScale {
   }
 }
 
+interface CatalogCategory {
+  id: string;
+  name: string;
+}
+
+function catalogCategories(products: Product[]): CatalogCategory[] {
+  const byId = new Map<string, string>();
+  for (const product of products) {
+    if (!product.category_id) continue;
+    byId.set(product.category_id, product.category_name ?? "Sin categoría");
+  }
+  return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) =>
+    a.name.localeCompare(b.name, "es"),
+  );
+}
+
+function barcodeQuantity(barcode: BarcodeLookup["barcode"]): number {
+  if (typeof barcode.pack_quantity === "number" && barcode.pack_quantity > 0) {
+    return Math.round(barcode.pack_quantity);
+  }
+  if (typeof barcode.pack_quantity_units === "number" && barcode.pack_quantity_units > 0) {
+    return toScaled(barcode.pack_quantity_units);
+  }
+  return QUANTITY_SCALE;
+}
+
 interface PosScreenProps {
   theme?: SatelliteTheme;
   onToggleTheme?: () => void;
@@ -59,9 +92,13 @@ interface PosScreenProps {
 
 export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {}) {
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<CatalogCategory[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [scanError, setScanError] = useState("");
+  const [scanNotice, setScanNotice] = useState("");
   const [search, setSearch] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -90,7 +127,7 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
   const items = useCartStore((state) => state.items);
   const addItem = useCartStore((state) => state.addItem);
   const clear = useCartStore((state) => state.clear);
-  const subtotal = cartSubtotal(items);
+  const total = cartGrandTotal(items);
   const debouncedSearch = useDebouncedValue(search, 250);
   const debouncedOrdersQuery = useDebouncedValue(ordersQuery, 250);
   const pendingOrdersCount = orders.filter(
@@ -202,9 +239,16 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
     setLoading(true);
     setError("");
 
-    fetchProducts(debouncedSearch)
+    fetchProducts(debouncedSearch, {
+      categoryId: selectedCategoryId || undefined,
+      onlyFavorites,
+    })
       .then((list) => {
-        if (!cancelled) setProducts(list);
+        if (cancelled) return;
+        setProducts(list);
+        if (!debouncedSearch && !selectedCategoryId && !onlyFavorites) {
+          setCategories(catalogCategories(list));
+        }
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message);
@@ -216,10 +260,16 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch]);
+  }, [debouncedSearch, selectedCategoryId, onlyFavorites]);
 
-  function handleAdd(product: Product) {
-    addItem(product);
+  useEffect(() => {
+    if (!scanNotice) return;
+    const timeout = window.setTimeout(() => setScanNotice(""), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [scanNotice]);
+
+  function handleAdd(product: Product, quantity?: number) {
+    addItem(product, quantity);
     playAdd();
   }
 
@@ -269,14 +319,53 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
     const term = raw.trim();
     if (!term) return;
     setScanError("");
+    setScanNotice("");
 
-    const localMatch = products.find(
-      (product) => (product.sku ?? "").toLowerCase() === term.toLowerCase(),
+    try {
+      const lookup = await resolveProductByBarcode(term);
+      if (lookup) {
+        const quantity = barcodeQuantity(lookup.barcode);
+        handleAdd(lookup.product, quantity);
+        setScanNotice(
+          `+${formatScaledQuantity(quantity)} · ${lookup.barcode.label ?? lookup.barcode.barcode_type ?? "Código"} — ${lookup.product.name ?? lookup.product.sku ?? "Producto"}`,
+        );
+        setSearch("");
+        return;
+      }
+    } catch (err) {
+      setScanError(
+        err instanceof Error ? err.message : "No fue posible resolver el código de barras.",
+      );
+      return;
+    }
+
+    const normalizedTerm = term.toLowerCase();
+    let product = products.find((candidate) =>
+      [candidate.sku, candidate.primary_barcode]
+        .filter(Boolean)
+        .some((value) => (value ?? "").toLowerCase() === normalizedTerm),
     );
-    const product = localMatch ?? (await fetchProductBySku(term));
+    if (!product) {
+      try {
+        product = (await fetchProductBySku(term)) ?? undefined;
+      } catch {
+        product = undefined;
+      }
+    }
+    if (!product) {
+      try {
+        const matches = await fetchProducts(term);
+        product = matches.find((candidate) => {
+          const name = (candidate.name ?? "").toLowerCase();
+          return name === normalizedTerm || name.includes(normalizedTerm);
+        }) ?? matches[0] ?? undefined;
+      } catch {
+        product = undefined;
+      }
+    }
 
     if (!product) {
-      setScanError(`No se encontró un producto con el SKU «${term}».`);
+      setScanError(`No se encontró un producto con el SKU o código «${term}».`);
       return;
     }
 
@@ -291,7 +380,7 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
         onSearch={setSearch}
         onSearchSubmit={(value) => void handleScan(value)}
         cartCount={items.length}
-        cartTotal={subtotal}
+        cartTotal={total}
         pendingOrdersCount={pendingOrdersCount}
         onOpenOrders={() => setOrdersOpen(true)}
         businesses={businesses}
@@ -316,6 +405,58 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
           className="min-w-0 flex-1 overflow-y-auto p-3"
           style={{ zoom: scaleMultiplier(fontScale) }}
         >
+          <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-border pb-2">
+            <button
+              type="button"
+              aria-pressed={!selectedCategoryId}
+              onClick={() => setSelectedCategoryId("")}
+              className={`rounded-full border px-3 py-1.5 text-xs ${
+                !selectedCategoryId
+                  ? "border-accent-brand bg-accent-brand/10 text-accent-brand"
+                  : "border-border text-muted-foreground"
+              }`}
+            >
+              Todas
+            </button>
+            {categories.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                aria-pressed={selectedCategoryId === category.id}
+                onClick={() => setSelectedCategoryId(category.id)}
+                className={`rounded-full border px-3 py-1.5 text-xs ${
+                  selectedCategoryId === category.id
+                    ? "border-accent-brand bg-accent-brand/10 text-accent-brand"
+                    : "border-border text-muted-foreground"
+                }`}
+              >
+                {category.name}
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-pressed={onlyFavorites}
+              onClick={() => setOnlyFavorites((value) => !value)}
+              className={`flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs ${
+                onlyFavorites
+                  ? "border-accent-brand bg-accent-brand/10 text-accent-brand"
+                  : "border-border text-muted-foreground"
+              }`}
+            >
+              <Star className="h-3 w-3" aria-hidden="true" />
+              Favoritos
+            </button>
+          </div>
+
+          {scanNotice && (
+            <div
+              role="status"
+              className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300"
+            >
+              {scanNotice}
+            </div>
+          )}
+
           {scanError && (
             <div
               role="alert"
@@ -389,7 +530,7 @@ export default function PosScreen({ theme, onToggleTheme }: PosScreenProps = {})
       <CheckoutDialog
         open={checkoutOpen}
         items={items}
-        total={subtotal}
+        total={total}
         activeOrder={activeOrder}
         orderItems={activeOrderItems}
         onClose={closeCheckout}

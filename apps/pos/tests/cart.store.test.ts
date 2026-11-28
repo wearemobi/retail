@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Product } from "../src/lib/api";
 import {
+  cartGrandTotal,
   cartLineTotal,
   cartSubtotal,
+  cartTaxTotal,
   useCartStore,
 } from "../src/store/cart.store";
 
@@ -20,6 +22,33 @@ const weightedProduct = {
   base_price: 10000,
   unit_of_measure: "36",
   is_weighable: true,
+} as Product;
+
+const taxableProduct = {
+  sku: "SKU-TAX",
+  name: "Producto gravado",
+  effective_price: 10000,
+  unit_of_measure: "59",
+  is_weighable: false,
+  tax_type: "TAXABLE",
+} as Product;
+
+const exemptProduct = {
+  sku: "SKU-EXEMPT",
+  name: "Producto exento",
+  effective_price: 20000,
+  unit_of_measure: "59",
+  is_weighable: false,
+  tax_type: "EXEMPT",
+} as Product;
+
+const nonSubjectProduct = {
+  sku: "SKU-NON-SUBJECT",
+  name: "Producto no sujeto",
+  effective_price: 10000,
+  unit_of_measure: "59",
+  is_weighable: false,
+  tax_type: "NON_SUBJECT",
 } as Product;
 
 beforeEach(() => {
@@ -94,5 +123,26 @@ describe("cart store — 10^-4 quantities", () => {
     expect(useCartStore.getState().items[0].quantity).toBe(12500);
     useCartStore.getState().decrement("SKU-KG");
     expect(useCartStore.getState().items[0].quantity).toBe(10000);
+  });
+
+  it("adds the scaled pack quantity coming from a barcode scan", () => {
+    useCartStore.getState().addItem(unitProduct, 120000);
+
+    const [item] = useCartStore.getState().items;
+    expect(item.quantity).toBe(120000);
+    expect(cartLineTotal(item)).toBe(180000);
+  });
+
+  it("charges 13% IVA only on TAXABLE lines", () => {
+    useCartStore.getState().addItem(taxableProduct);
+    useCartStore.getState().addItem(exemptProduct);
+    useCartStore.getState().addItem(nonSubjectProduct);
+    const items = useCartStore.getState().items;
+
+    expect(cartSubtotal(items)).toBe(40000);
+    expect(cartTaxTotal(items)).toBe(1300);
+    expect(cartGrandTotal(items)).toBe(41300);
+    expect(items.find((item) => item.sku === "SKU-EXEMPT")?.taxType).toBe("EXEMPT");
+    expect(items.find((item) => item.sku === "SKU-NON-SUBJECT")?.taxType).toBe("NON_SUBJECT");
   });
 });
